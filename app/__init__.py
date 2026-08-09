@@ -1,11 +1,12 @@
 import os
 import requests
 import keyring
-from PyQt6.QtWidgets import QMainWindow, QStackedWidget, QLabel, QVBoxLayout, QWidget, QMessageBox
+from PyQt6.QtWidgets import QMainWindow, QStackedWidget, QMessageBox
 from PyQt6.QtGui import QIcon
 
 from app.ui.login_window import LoginView
 from app.ui.projects_view import ProjectsView
+from app.ui.editor_view import EditorView
 from app.utils.config import ConfigManager
 
 class App(QMainWindow):
@@ -37,12 +38,8 @@ class App(QMainWindow):
         )
         self.stack.addWidget(self.projects_view)
 
-        # Index 2: Redaktor Sahifasi (Hozircha konteyner)
-        self.editor_view = QWidget()
-        self.editor_layout = QVBoxLayout()
-        self.editor_label = QLabel("<h1>Scode Editor — Tahrirlovchi</h1>")
-        self.editor_layout.addWidget(self.editor_label)
-        self.editor_view.setLayout(self.editor_layout)
+        # Index 2: Redaktor Sahifasi
+        self.editor_view = EditorView(parent=self, on_back=self.show_projects)
         self.stack.addWidget(self.editor_view)
 
         # Dastur ochilganda avto-login tekshiruvi
@@ -73,7 +70,6 @@ class App(QMainWindow):
         self.projects_view.load_recent_projects()
         self.stack.setCurrentIndex(1)
 
-    def show_editor(self, project_path):
-        # Loyiha tanlanganda redaktor sahifasiga o'tish
-        self.editor_label.setText(f"<h3>Faol Loyiha: {project_path}</h3>")
+    def show_editor(self, project_path, auto_install=False):
+        self.editor_view.set_project_path(project_path, auto_install=auto_install)
         self.stack.setCurrentIndex(2)
