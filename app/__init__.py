@@ -8,6 +8,8 @@ from app.ui.login_window import LoginView
 from app.ui.projects_view import ProjectsView
 from app.ui.editor_view import EditorView
 from app.utils.config import ConfigManager
+from app.utils.paths import get_app_icon_path
+
 
 class App(QMainWindow):
     def __init__(self):
@@ -18,8 +20,8 @@ class App(QMainWindow):
         # 1. AppData/Local Config menejerini yuklash
         self.config = ConfigManager()
 
-        # Window Ikonkasi
-        icon_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'icon.png')
+        # Window Ikonkasini AppData/Local dan yuklash
+        icon_path = get_app_icon_path()
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 

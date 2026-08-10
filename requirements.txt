@@ -2,3 +2,4 @@ PyQt6
 QScintilla
 keyring
 requests
+PyQt6-QScintilla
