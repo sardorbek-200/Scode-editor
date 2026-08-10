@@ -31,6 +31,20 @@ def get_projects_dir() -> str:
     return d
 
 
+def get_projects_json_path() -> str:
+    """AppData/Local/ScodeEditor/index.json faylining to'liq yo'lini qaytaradi."""
+    local_app_data = os.environ.get("LOCALAPPDATA", "")
+    if not local_app_data:
+        local_app_data = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation)
+
+    base_dir = os.path.join(local_app_data, "ScodeEditor")
+    os.makedirs(base_dir, exist_ok=True)
+
+    json_path = os.path.join(base_dir, "index.json")
+    print(f"DEBUG: Aniq JSON yo'li -> {json_path}")
+    return json_path
+
+
 def get_icons_dir() -> str:
     """SVG va ikonkalar saqlanadigan papka (%LOCALAPPDATA%/ScodeEditor/assets/icons/)"""
     d = os.path.join(get_app_data_dir(), "assets", "icons")
@@ -75,4 +89,5 @@ def ensure_app_data_dirs() -> None:
     get_app_data_dir()
     get_projects_dir()
     get_icons_dir()
+    get_projects_json_path()
     sync_local_assets()

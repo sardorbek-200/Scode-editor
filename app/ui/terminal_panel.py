@@ -66,83 +66,97 @@ class TerminalPanel(QWidget):
         self.setMinimumHeight(120)
         self.setStyleSheet("""
             QWidget {
-                background-color: #141414;
+                background-color: #181818;
                 color: #cccccc;
             }
-            QLabel {
-                color: #9cdcfe;
+            QWidget#terminalHeader {
+                background-color: #252526;
+                border-top: 1px solid #2d2d2d;
+                border-bottom: 1px solid #2d2d2d;
+            }
+            QLabel#terminalTitle {
+                color: #cccccc;
                 font-weight: bold;
-                font-size: 12px;
+                font-size: 11px;
+            }
+            QLabel#terminalPath {
+                color: #777777;
+                font-size: 11px;
             }
             QTextEdit {
-                background-color: #141414;
+                background-color: #181818;
                 color: #cccccc;
-                border: 1px solid #2d2d2d;
-                border-bottom: none;
-                font-family: Consolas, "Courier New", monospace;
+                border: none;
+                font-family: "Cascadia Code", "Fira Code", Consolas, "Courier New", monospace;
                 font-size: 10pt;
-                padding: 4px;
+                padding: 6px;
             }
             QLineEdit {
-                background-color: #1a1a1a;
+                background-color: #181818;
                 color: #ffffff;
-                border: 1px solid #2d2d2d;
-                border-top: none;
+                border: none;
+                border-top: 1px solid #2d2d2d;
                 padding: 6px 8px;
-                font-family: Consolas, "Courier New", monospace;
+                font-family: "Cascadia Code", "Fira Code", Consolas, "Courier New", monospace;
                 font-size: 10pt;
             }
             QPushButton {
-                background-color: #252526;
+                background-color: transparent;
                 color: #cccccc;
-                border: 1px solid #2d2d2d;
+                border: none;
                 border-radius: 3px;
-                padding: 4px 10px;
+                padding: 3px 8px;
                 font-size: 11px;
             }
             QPushButton:hover {
-                background-color: #333333;
+                background-color: #2a2d2e;
                 color: #ffffff;
+            }
+            QPushButton:pressed {
+                background-color: #37373d;
             }
         """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(4)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
         # 1. Yuqori ixcham sarlavha paneli
-        top_layout = QHBoxLayout()
-        top_layout.setContentsMargins(0, 0, 0, 0)
+        header_widget = QWidget()
+        header_widget.setObjectName("terminalHeader")
+        top_layout = QHBoxLayout(header_widget)
+        top_layout.setContentsMargins(8, 4, 8, 4)
         top_layout.setSpacing(8)
 
         # Terminal SVG ikonkasi
         terminal_icon_label = QLabel()
-        terminal_icon_label.setPixmap(IconManager.get_pixmap("terminal", 18, 18))
+        terminal_icon_label.setPixmap(IconManager.get_pixmap("terminal", 16, 16))
         top_layout.addWidget(terminal_icon_label)
 
-        self.title_label = QLabel("Terminal")
+        self.title_label = QLabel("TERMINAL")
+        self.title_label.setObjectName("terminalTitle")
         top_layout.addWidget(self.title_label)
 
         self.path_label = QLabel(f"[{self.project_path}]")
-        self.path_label.setStyleSheet("color: #777777; font-weight: normal; font-size: 11px;")
+        self.path_label.setObjectName("terminalPath")
         top_layout.addWidget(self.path_label, 1)
 
-        # SVG Tozalash va To'xtatish tugmalari
+        # SVG Tozalash va To'xtatish tugmalari (flat icon button)
         clear_btn = QPushButton(" Tozalash")
         clear_btn.setIcon(IconManager.get_icon("clear"))
-        clear_btn.setIconSize(QSize(16, 16))
+        clear_btn.setIconSize(QSize(14, 14))
         clear_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         clear_btn.clicked.connect(self.clear_output)
         top_layout.addWidget(clear_btn)
 
-        kill_btn = QPushButton(" To'xtatish (Kill)")
+        kill_btn = QPushButton(" To'xtatish")
         kill_btn.setIcon(IconManager.get_icon("stop"))
-        kill_btn.setIconSize(QSize(16, 16))
+        kill_btn.setIconSize(QSize(14, 14))
         kill_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         kill_btn.clicked.connect(self.stop_process)
         top_layout.addWidget(kill_btn)
 
-        layout.addLayout(top_layout)
+        layout.addWidget(header_widget)
 
         # 2. Chiqish oynasi (QTextEdit) va Input maydoni (CommandLineEdit)
         console_container = QVBoxLayout()
@@ -162,14 +176,13 @@ class TerminalPanel(QWidget):
 
         prompt_label = QLabel(" $ ")
         prompt_label.setStyleSheet("""
-            background-color: #1a1a1a;
+            background-color: #181818;
             color: #23d160;
-            font-size: 12px;
+            font-family: "Cascadia Code", "Fira Code", Consolas, "Courier New", monospace;
+            font-size: 10pt;
             font-weight: bold;
-            border: 1px solid #2d2d2d;
-            border-top: none;
-            border-right: none;
-            padding-left: 4px;
+            border-top: 1px solid #2d2d2d;
+            padding-left: 6px;
         """)
         input_container.addWidget(prompt_label)
 
@@ -238,6 +251,13 @@ class TerminalPanel(QWidget):
         # SGR rang kodlarini HTML span teglari bilan almashtirish
         result = re.sub(r'\x1b\[([0-9;]*)m', _replace_ansi, cleaned)
         return result
+
+    def execute_command(self, cmd: str):
+        """Tashqi vidjetdan buyruq yuborilganda bajarish (▶ Run tugmasi)"""
+        if not cmd:
+            return
+        self.input_line.setText(cmd)
+        self.run_command()
 
     def run_command(self):
         """Enter bosilganda buyruqni bajarish va tarixga saqlash"""

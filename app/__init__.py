@@ -7,6 +7,7 @@ from PyQt6.QtGui import QIcon
 from app.ui.login_window import LoginView
 from app.ui.projects_view import ProjectsView
 from app.ui.editor_view import EditorView
+from app.ui.styles import get_app_stylesheet
 from app.utils.config import ConfigManager
 from app.utils.paths import get_app_icon_path
 
@@ -16,6 +17,7 @@ class App(QMainWindow):
         super().__init__()
         self.setWindowTitle("Scode Editor")
         self.setGeometry(100, 100, 1000, 650)
+        self.setStyleSheet(get_app_stylesheet())
 
         # 1. AppData/Local Config menejerini yuklash
         self.config = ConfigManager()

@@ -68,6 +68,14 @@ class ProjectsView(QWidget):
         self.setLayout(main_layout)
         self.load_recent_projects()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.refresh_projects_list()
+
+    def refresh_projects_list(self):
+        """AppData/Local/ScodeEditor/index.json faylidan loyihalarni qayta yuklash"""
+        self.load_recent_projects()
+
     def load_recent_projects(self):
         """So'nggi loyihalarni qayta yuklash"""
         for i in reversed(range(self.cards_layout.count())):
@@ -119,5 +127,5 @@ class ProjectsView(QWidget):
                 project_meta["name"] = saved_data.get("name")
 
             self.config.save_project_data(folder, extra_data=project_meta)
-            self.load_recent_projects()
+            self.refresh_projects_list()
             self.on_project_selected(folder, False)

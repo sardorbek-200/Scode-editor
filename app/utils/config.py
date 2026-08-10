@@ -3,7 +3,7 @@ import json
 import hashlib
 import shutil
 
-from app.utils.paths import get_app_data_dir, get_projects_dir, get_icons_dir
+from app.utils.paths import get_app_data_dir, get_projects_dir, get_icons_dir, get_projects_json_path
 
 
 class ConfigManager:
@@ -16,7 +16,7 @@ class ConfigManager:
         self.projects_dir = get_projects_dir()
         self.icons_dir = get_icons_dir()
 
-        self.index_file = os.path.join(self.app_data_dir, 'index.json')
+        self.index_file = get_projects_json_path()
 
     def _get_project_id(self, project_path):
         normalized_path = os.path.normpath(project_path).lower()
@@ -153,3 +153,31 @@ class ConfigManager:
             except Exception:
                 pass
         return []
+
+    def get_settings(self) -> dict:
+        """Ilovaning global sozlamalarini (config.json) yuklash"""
+        config_file = os.path.join(self.app_data_dir, "config.json")
+        defaults = {
+            "font_family": "Consolas",
+            "font_size": 11,
+            "tab_size": 4,
+            "auto_save_interval": 2,
+            "show_minimap": True,
+        }
+        if os.path.exists(config_file):
+            try:
+                with open(config_file, "r", encoding="utf-8") as f:
+                    saved = json.load(f)
+                    defaults.update(saved)
+            except Exception as e:
+                print(f"Sozlamalarni o'qishda xatolik: {e}")
+        return defaults
+
+    def save_settings(self, settings_dict: dict) -> None:
+        """Ilovaning global sozlamalarini (config.json) saqlash"""
+        config_file = os.path.join(self.app_data_dir, "config.json")
+        try:
+            with open(config_file, "w", encoding="utf-8") as f:
+                json.dump(settings_dict, f, indent=4, ensure_ascii=False)
+        except Exception as e:
+            print(f"Sozlamalarni saqlashda xatolik: {e}")

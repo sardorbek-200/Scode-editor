@@ -5,6 +5,7 @@ from PyQt6.Qsci import (
     QsciLexerJavaScript,
     QsciLexerHTML,
     QsciLexerCSS,
+    QsciLexerCPP,
 )
 from PyQt6.QtGui import QColor, QFont
 
@@ -35,23 +36,19 @@ class ScodeScintillaEditor(QsciScintilla):
 
         # Margin 0: Qator raqamlari
         self.setMarginType(0, QsciScintilla.MarginType.NumberMargin)
-        self.setMarginWidth(0, "00000")
+        self.setMarginWidth(0, " 000 ")
         self.setMarginLineNumbers(0, True)
 
-        # Margin 1: Chegara chizig'ini yo'qotish
-        self.setMarginWidth(1, 0)
-
-        # Margin 2: Code Folding (Kodni yig'ish [-] / [+]) va oq kvadratlarni yo'qotish
-        self.setFolding(QsciScintilla.FoldStyle.BoxedTreeFoldStyle)
+        # Margin 1..4: Ortiqcha oq margin panellarini to'liq o'chirish (width = 0)
+        for i in range(1, 5):
+            self.setMarginWidth(i, 0)
+            self.setMarginType(i, QsciScintilla.MarginType.SymbolMargin)
         self.setFoldMarginColors(QColor("#1e1e1e"), QColor("#1e1e1e"))
-        self.setMarginMarkerMask(2, QsciScintilla.SC_MARGIN_SYMBOL)
-        self.setMarkerBackgroundColor(QColor("#2d2d2d"), -1)
-        self.setMarkerForegroundColor(QColor("#cccccc"), -1)
 
         # 3. Karetka (Kursor va Joriy qator ranglari)
         self.setCaretForegroundColor(QColor("#ffffff"))
         self.setCaretLineVisible(True)
-        self.setCaretLineBackgroundColor(QColor("#282828"))
+        self.setCaretLineBackgroundColor(QColor("#2a2d2e"))
         self.setCaretWidth(2)
 
         # 4. Indentation & Tabs (Avto Tab tashlash)
@@ -74,48 +71,103 @@ class ScodeScintillaEditor(QsciScintilla):
         self.setPaper(QColor("#1e1e1e"))
         self.setColor(QColor("#d4d4d4"))
 
+    def apply_settings(self, font_family: str = "Consolas", font_size: int = 11, tab_size: int = 4):
+        """Sozlamalarga muvofiq shrift va tab o'lchamlarini yangilash"""
+        self.default_font = QFont(font_family, font_size)
+        self.default_font.setFixedPitch(True)
+        self.setFont(self.default_font)
+
+        self.setTabWidth(tab_size)
+        self.setIndentationWidth(tab_size)
+
+        lexer = self.lexer()
+        if lexer:
+            self._apply_dark_base(lexer)
+
     def set_lexer_for_file(self, file_path: str):
         """Fayl kengaytmasiga qarab mos QsciLexer va ranglarni biriktirish"""
         ext = os.path.splitext(file_path)[1].lower() if file_path else ""
 
+        lexer = None
         if ext == ".py":
             lexer = QsciLexerPython(self)
             self._apply_dark_base(lexer)
             self._style_python_lexer(lexer)
-            self.setLexer(lexer)
         elif ext in [".js", ".jsx", ".ts", ".tsx", ".json"]:
             lexer = QsciLexerJavaScript(self)
             self._apply_dark_base(lexer)
             self._style_javascript_lexer(lexer)
-            self.setLexer(lexer)
         elif ext in [".html", ".htm", ".xml"]:
             lexer = QsciLexerHTML(self)
             self._apply_dark_base(lexer)
             self._style_html_lexer(lexer)
-            self.setLexer(lexer)
         elif ext in [".css", ".scss", ".less"]:
             lexer = QsciLexerCSS(self)
             self._apply_dark_base(lexer)
             self._style_css_lexer(lexer)
+        elif ext in [".cpp", ".c", ".h", ".hpp", ".cs"]:
+            lexer = QsciLexerCPP(self)
+            self._apply_dark_base(lexer)
+
+        if lexer:
+            self.current_lexer = lexer
+            self._current_lexer = lexer  # GC (Garbage Collector) xotiradan o'chirib yubormasligi uchun
             self.setLexer(lexer)
         else:
+            self.current_lexer = None
+            self._current_lexer = None
             self.setLexer(None)
             self.setFont(self.default_font)
-            self.setColor(QColor("#d4d4d4"))
-            self.setPaper(QColor("#1e1e1e"))
+
+        # setLexer() dan KEYIN margin ranglarini qorong'i (#1e1e1e) ga majburiy biriktirish
+        self._enforce_dark_margins()
+
+    def _enforce_dark_margins(self):
+        """Margin va line number ranglarini dark (#1e1e1e va #858585) rejimida saqlash"""
+        dark_bg = QColor("#1e1e1e")
+        margin_fg = QColor("#858585")
+
+        self.setMarginsBackgroundColor(dark_bg)
+        self.setMarginsForegroundColor(margin_fg)
+        self.setMarginType(0, QsciScintilla.MarginType.NumberMargin)
+        self.setMarginWidth(0, " 000 ")
+        self.setMarginLineNumbers(0, True)
+
+        for i in range(1, 5):
+            self.setMarginWidth(i, 0)
+            self.setMarginType(i, QsciScintilla.MarginType.SymbolMargin)
+
+        self.setFoldMarginColors(dark_bg, dark_bg)
+        self.setCaretLineVisible(True)
+        self.setCaretLineBackgroundColor(QColor("#2a2d2e"))
+        self.setCaretForegroundColor(QColor("#ffffff"))
+        self.setPaper(dark_bg)
+        self.setColor(QColor("#d4d4d4"))
+
+        # Scintilla ichki style 33 (STYLE_LINENUMBER) fonini #1e1e1e ga bo'yash
+        self.SendScintilla(QsciScintilla.SCI_STYLESETBACK, QsciScintilla.STYLE_LINENUMBER, dark_bg)
+        self.SendScintilla(QsciScintilla.SCI_STYLESETFORE, QsciScintilla.STYLE_LINENUMBER, margin_fg)
 
     def _apply_dark_base(self, lexer):
         """Lexer uchun barcha fon va matn ranglarini #1e1e1e hamda #d4d4d4 ga sozlash"""
+        dark_bg = QColor("#1e1e1e")
+        default_fg = QColor("#d4d4d4")
+        margin_fg = QColor("#858585")
+
         lexer.setDefaultFont(self.default_font)
         lexer.setFont(self.default_font)
-        lexer.setDefaultPaper(QColor("#1e1e1e"))
-        lexer.setPaper(QColor("#1e1e1e"))
-        lexer.setDefaultColor(QColor("#d4d4d4"))
-        lexer.setColor(QColor("#d4d4d4"))
+        lexer.setDefaultPaper(dark_bg)
+        lexer.setPaper(dark_bg)
+        lexer.setDefaultColor(default_fg)
+        lexer.setColor(default_fg)
 
-        bg = QColor("#1e1e1e")
         for style in range(128):
-            lexer.setPaper(bg, style)
+            lexer.setPaper(dark_bg, style)
+
+        lexer.setPaper(dark_bg, QsciScintilla.STYLE_LINENUMBER)
+        lexer.setColor(margin_fg, QsciScintilla.STYLE_LINENUMBER)
+        lexer.setPaper(dark_bg, QsciScintilla.STYLE_DEFAULT)
+        lexer.setColor(default_fg, QsciScintilla.STYLE_DEFAULT)
 
     def _style_python_lexer(self, lexer):
         lexer.setColor(QColor("#569CD6"), QsciLexerPython.Keyword)
@@ -162,7 +214,9 @@ class ScodeScintillaEditor(QsciScintilla):
 
     def _style_css_lexer(self, lexer):
         lexer.setColor(QColor("#D7BA7D"), QsciLexerCSS.Tag)
-        lexer.setColor(QColor("#9CDCFE"), QsciLexerCSS.Property)
+        lexer.setColor(QColor("#9CDCFE"), QsciLexerCSS.CSS1Property)
+        lexer.setColor(QColor("#9CDCFE"), QsciLexerCSS.CSS2Property)
+        lexer.setColor(QColor("#9CDCFE"), QsciLexerCSS.CSS3Property)
         lexer.setColor(QColor("#569CD6"), QsciLexerCSS.Value)
         lexer.setColor(QColor("#6A9955"), QsciLexerCSS.Comment)
 

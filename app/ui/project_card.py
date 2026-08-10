@@ -34,11 +34,12 @@ class ProjectCard(QFrame):
         self.setStyleSheet("""
             QFrame {
                 background-color: #252526;
-                border-radius: 8px;
+                border: 1px solid #2d2d2d;
+                border-radius: 6px;
                 padding: 12px;
             }
             QFrame:hover {
-                background-color: #2d2d2d;
+                background-color: #2a2d2e;
                 border: 1px solid #007acc;
             }
             QLabel { color: #cccccc; border: none; }
