@@ -288,6 +288,10 @@ QWidget#searchPanel {
 """
 
 
-def get_app_stylesheet() -> str:
-    """Retorna o stylesheet QSS completo no tema VS Code Dark+."""
-    return VS_CODE_DARK_QSS
+from app.utils.themes import get_stylesheet, DEFAULT_THEME
+
+
+def get_app_stylesheet(theme_name: str = None) -> str:
+    """Ilovaning tanlangan mavzusi bo'yicha QSS stilini qaytarish"""
+    theme = theme_name or DEFAULT_THEME
+    return get_stylesheet(theme)

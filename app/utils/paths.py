@@ -41,7 +41,6 @@ def get_projects_json_path() -> str:
     os.makedirs(base_dir, exist_ok=True)
 
     json_path = os.path.join(base_dir, "index.json")
-    print(f"DEBUG: Aniq JSON yo'li -> {json_path}")
     return json_path
 
 
@@ -71,8 +70,10 @@ def sync_local_assets() -> None:
             if os.path.isfile(src):
                 try:
                     shutil.copy2(src, dst)
-                except Exception as e:
-                    print(f"Asset nusxalashda xatolik ({item}): {e}")
+                except Exception:
+                    pass  # No debug print – silently ignore copy errors
+
+
 
 
 def get_app_icon_path() -> str:

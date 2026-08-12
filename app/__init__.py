@@ -3,6 +3,7 @@ import requests
 import keyring
 from PyQt6.QtWidgets import QMainWindow, QStackedWidget, QMessageBox
 from PyQt6.QtGui import QIcon
+from PyQt6.QtCore import QThread
 
 from app.ui.login_window import LoginView
 from app.ui.projects_view import ProjectsView
@@ -17,10 +18,10 @@ class App(QMainWindow):
         super().__init__()
         self.setWindowTitle("Scode Editor")
         self.setGeometry(100, 100, 1000, 650)
-        self.setStyleSheet(get_app_stylesheet())
-
         # 1. AppData/Local Config menejerini yuklash
         self.config = ConfigManager()
+        current_theme = self.config.get_settings().get("theme", "Dark (One Dark Pro)")
+        self.change_theme(current_theme)
 
         # Window Ikonkasini AppData/Local dan yuklash
         icon_path = get_app_icon_path()
@@ -69,6 +70,17 @@ class App(QMainWindow):
     def show_login(self):
         self.stack.setCurrentIndex(0)
 
+    def closeEvent(self, event):
+        """Safely terminate all background QThreads before the application exits."""
+        for thread in self.findChildren(QThread):
+            if thread.isRunning():
+                try:
+                    thread.quit()
+                    thread.wait(3000)  # wait up to 3 seconds
+                except Exception:
+                    pass
+        event.accept()
+
     def show_projects(self):
         # Loyihalar sahifasini ochish va kartalarni qayta yuklash
         self.projects_view.load_recent_projects()
@@ -77,3 +89,13 @@ class App(QMainWindow):
     def show_editor(self, project_path, auto_install=False):
         self.editor_view.set_project_path(project_path, auto_install=auto_install)
         self.stack.setCurrentIndex(2)
+
+    def change_theme(self, theme_name: str):
+        """Mavzuni darhol o'zgartirish va butun ilovaga va saqlashga tatbiq etish"""
+        from app.utils.themes import get_stylesheet
+        stylesheet = get_stylesheet(theme_name)
+        self.setStyleSheet(stylesheet)
+
+        settings = self.config.get_settings()
+        settings["theme"] = theme_name
+        self.config.save_settings(settings)

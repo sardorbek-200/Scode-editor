@@ -170,6 +170,15 @@ class EditorView(QWidget):
         self.path_label.setWordWrap(True)
         top_bar.addWidget(self.path_label, 1)
 
+        # Git Paneli tugmasi (Ctrl + Shift + G)
+        self.git_button = QPushButton(" Git Boshqaruv")
+        self.git_button.setIcon(IconManager.get_icon("git"))
+        self.git_button.setIconSize(QSize(14, 14))
+        self.git_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.git_button.setToolTip("Git Boshqaruv Panelini ochish (Ctrl + Shift + G)")
+        self.git_button.clicked.connect(self.open_git_dialog)
+        top_bar.addWidget(self.git_button)
+
         # Tashqi terminal tugmasi
         self.ext_terminal_button = QPushButton(" Tashqi terminal")
         self.ext_terminal_button.setIcon(IconManager.get_icon("terminal"))
@@ -263,6 +272,10 @@ class EditorView(QWidget):
 
         self.replace_shortcut = QShortcut(QKeySequence("Ctrl+H"), self)
         self.replace_shortcut.activated.connect(self._on_replace_shortcut)
+
+        # Git Panel Shortcut (Ctrl + Shift + G)
+        self.git_shortcut = QShortcut(QKeySequence("Ctrl+Shift+G"), self)
+        self.git_shortcut.activated.connect(self.open_git_dialog)
 
         self.model = QFileSystemModel()
         self.model.setReadOnly(False)
@@ -846,6 +859,28 @@ class EditorView(QWidget):
             self.status_label.setText(f"Tashqi terminal ochildi: {path}")
         except Exception as e:
             QMessageBox.critical(self, "Xatolik", f"Tashqi terminalni ochishda xatolik yuz berdi: {e}")
+
+    def open_git_dialog(self):
+        """Git boshqaruv modal oynasini (Source Control) ochish (Ctrl + Shift + G)"""
+        from app.ui.git_panel import GitPanel
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Scode Editor — Git Source Control")
+        dialog.setMinimumSize(750, 520)
+
+        dlg_layout = QVBoxLayout(dialog)
+        dlg_layout.setContentsMargins(0, 0, 0, 0)
+
+        git_panel = GitPanel(dialog, project_path=self.project_path)
+        dlg_layout.addWidget(git_panel)
+
+        # Markazda joylashtirish
+        geo = self.geometry()
+        x = geo.x() + (geo.width() - dialog.width()) // 2
+        y = geo.y() + (geo.height() - dialog.height()) // 2
+        dialog.move(max(0, x), max(0, y))
+
+        dialog.exec()
 
     def open_quick_open_dialog(self):
         """Ctrl + P tezkor fayl qidiruv modalini ochish"""

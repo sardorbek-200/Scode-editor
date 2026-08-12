@@ -123,6 +123,16 @@ class SettingsDialog(QDialog):
         self.form_layout = QFormLayout(scroll_content)
         self.form_layout.setSpacing(12)
 
+        # 0. Interfeys Mavzusi (Theme)
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItems([
+            "Dark (One Dark Pro)",
+            "Dark (Dracula)",
+            "Dark+ (VS Code)",
+            "Light (GitHub)"
+        ])
+        self.form_layout.addRow("Rangli Mavzu (Theme):", self.theme_combo)
+
         # 1. Shrift Turi (Font Family)
         self.font_combo = QComboBox()
         self.font_combo.addItems(["Consolas", "Cascadia Code", "Fira Code", "Courier New", "Arial"])
@@ -168,6 +178,11 @@ class SettingsDialog(QDialog):
 
     def _load_current_values(self):
         """Mavjud sozlamalarni vidjetlarga biriktirish"""
+        theme_name = self.settings_data.get("theme", "Dark (One Dark Pro)")
+        t_idx = self.theme_combo.findText(theme_name)
+        if t_idx >= 0:
+            self.theme_combo.setCurrentIndex(t_idx)
+
         font_family = self.settings_data.get("font_family", "Consolas")
         idx = self.font_combo.findText(font_family)
         if idx >= 0:
@@ -199,7 +214,9 @@ class SettingsDialog(QDialog):
 
     def save_settings(self):
         tab_val = 2 if self.tab_size_combo.currentIndex() == 0 else 4
+        theme_val = self.theme_combo.currentText()
         updated = {
+            "theme": theme_val,
             "font_family": self.font_combo.currentText(),
             "font_size": self.font_size_spin.value(),
             "tab_size": tab_val,
@@ -208,5 +225,14 @@ class SettingsDialog(QDialog):
         }
 
         self.config.save_settings(updated)
+
+        # Main Window yoki parent oyna bo'ylab mavzuni zudlik bilan almashtirish
+        p = self.parent()
+        while p:
+            if hasattr(p, "change_theme"):
+                p.change_theme(theme_val)
+                break
+            p = p.parent()
+
         self.settings_saved.emit(updated)
         self.accept()
