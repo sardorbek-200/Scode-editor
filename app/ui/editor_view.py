@@ -1,5 +1,7 @@
 import os
+import sys
 import shutil
+import subprocess
 import webbrowser
 
 from PyQt6.Qsci import (
@@ -168,28 +170,14 @@ class EditorView(QWidget):
         self.path_label.setWordWrap(True)
         top_bar.addWidget(self.path_label, 1)
 
-        # ▶ Run Tugmasi
-        self.run_button = QPushButton(" ▶ Run")
-        self.run_button.setIcon(IconManager.get_icon("play"))
-        self.run_button.setIconSize(QSize(14, 14))
-        self.run_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.run_button.setToolTip("Faylni ishga tushirish (Ctrl + F5)")
-        self.run_button.setStyleSheet("""
-            QPushButton {
-                background-color: #23d160;
-                color: #ffffff;
-                border: none;
-                border-radius: 3px;
-                padding: 4px 12px;
-                font-weight: bold;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #20bc55;
-            }
-        """)
-        self.run_button.clicked.connect(self.run_active_file)
-        top_bar.addWidget(self.run_button)
+        # Tashqi terminal tugmasi
+        self.ext_terminal_button = QPushButton(" Tashqi terminal")
+        self.ext_terminal_button.setIcon(IconManager.get_icon("terminal"))
+        self.ext_terminal_button.setIconSize(QSize(14, 14))
+        self.ext_terminal_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.ext_terminal_button.setToolTip("Loyiha papkasini operatsion tizimning alohida terminalida ochish")
+        self.ext_terminal_button.clicked.connect(self.open_external_terminal)
+        top_bar.addWidget(self.ext_terminal_button)
 
         # Sozlamalar Tugmasi (Ctrl + ,)
         self.settings_button = QPushButton(" Sozlamalar")
@@ -210,9 +198,6 @@ class EditorView(QWidget):
         self.search_panel.replace_all_requested.connect(lambda a, b: self._replace_all(a, b))
         self.search_panel.closed.connect(self._on_search_closed)
         main_layout.addWidget(self.search_panel)
-
-        self.main_vsplitter = QSplitter(Qt.Orientation.Vertical)
-        self.main_vsplitter.setHandleWidth(2)
 
         self.top_hsplitter = QSplitter(Qt.Orientation.Horizontal)
         self.top_hsplitter.setHandleWidth(2)
@@ -235,12 +220,7 @@ class EditorView(QWidget):
         self.top_hsplitter.addWidget(self.tab_widget)
 
         self.top_hsplitter.setSizes([220, 780])
-        self.main_vsplitter.addWidget(self.top_hsplitter)
-
-        self.terminal_panel = TerminalPanel(parent=self, project_path=self.project_path)
-        self.main_vsplitter.addWidget(self.terminal_panel)
-        self.main_vsplitter.setSizes([450, 250])
-        main_layout.addWidget(self.main_vsplitter, 1)
+        main_layout.addWidget(self.top_hsplitter, 1)
 
         # Status Bar
         status_bar_widget = QWidget()
@@ -591,7 +571,8 @@ class EditorView(QWidget):
         root_index = self.model.index(project_path)
         self.file_tree.setRootIndex(root_index)
 
-        self.terminal_panel.set_project_path(project_path)
+        if hasattr(self, "terminal_panel") and self.terminal_panel:
+            self.terminal_panel.set_project_path(project_path)
 
         if auto_install:
             self._start_installation()
@@ -788,7 +769,7 @@ class EditorView(QWidget):
 
     # ----------------- ▶ Run, Quick Open (Ctrl+P) & Settings (Ctrl+,) Handlers -----------------
     def run_active_file(self):
-        """Aktiv faylni avto-saqlab, kengaytmasiga ko'ra terminal yoki brauzerda ishga tushirish (▶ Run / Ctrl+F5)"""
+        """Aktiv faylni avto-saqlab, kengaytmasiga ko'ra alohida konsol yoki brauzerda ishga tushirish (▶ Run / Ctrl+F5)"""
         editor, file_path = self.get_current_editor()
         if not editor or not file_path:
             QMessageBox.information(self, "Ma'lumot", "Ishga tushirish uchun fayl tanlanmagan.")
@@ -798,19 +779,73 @@ class EditorView(QWidget):
 
         ext = os.path.splitext(file_path)[1].lower()
         quoted_path = f'"{file_path}"'
+        cwd = os.path.dirname(file_path) or self.project_path or os.getcwd()
 
-        if ext == ".py":
-            self.status_label.setText(f"Python ishga tushirilmoqda: {file_path}")
-            self.terminal_panel.execute_command(f"python {quoted_path}")
-        elif ext in [".js", ".ts"]:
-            self.status_label.setText(f"Node.js ishga tushirilmoqda: {file_path}")
-            self.terminal_panel.execute_command(f"node {quoted_path}")
-        elif ext in [".html", ".htm"]:
-            self.status_label.setText(f"Brauzerda ochilmoqda: {file_path}")
-            webbrowser.open(file_path)
-        else:
-            self.status_label.setText(f"Ishga tushirilmoqda: {file_path}")
-            self.terminal_panel.execute_command(f"python {quoted_path}")
+        if hasattr(self, "terminal_panel") and self.terminal_panel:
+            if ext == ".py":
+                self.terminal_panel.execute_command(f"python {quoted_path}")
+            elif ext in [".js", ".ts"]:
+                self.terminal_panel.execute_command(f"node {quoted_path}")
+            elif ext in [".html", ".htm"]:
+                webbrowser.open(file_path)
+            else:
+                self.terminal_panel.execute_command(f"python {quoted_path}")
+            return
+
+        # Tashqi konsol oynasida ishga tushirish
+        import subprocess
+        try:
+            if ext == ".py":
+                self.status_label.setText(f"Python ishga tushirilmoqda: {file_path}")
+                if os.name == 'nt':
+                    subprocess.Popen(["cmd.exe", "/K", "python", file_path], cwd=cwd, creationflags=0x10)
+                else:
+                    subprocess.Popen(["python3", file_path], cwd=cwd)
+            elif ext in [".js", ".ts"]:
+                self.status_label.setText(f"Node.js ishga tushirilmoqda: {file_path}")
+                if os.name == 'nt':
+                    subprocess.Popen(["cmd.exe", "/K", "node", file_path], cwd=cwd, creationflags=0x10)
+                else:
+                    subprocess.Popen(["node", file_path], cwd=cwd)
+            elif ext in [".html", ".htm"]:
+                self.status_label.setText(f"Brauzerda ochilmoqda: {file_path}")
+                webbrowser.open(file_path)
+            else:
+                self.status_label.setText(f"Ishga tushirilmoqda: {file_path}")
+                if os.name == 'nt':
+                    subprocess.Popen(["cmd.exe", "/K", "python", file_path], cwd=cwd, creationflags=0x10)
+                else:
+                    subprocess.Popen(["python3", file_path], cwd=cwd)
+        except Exception as e:
+            QMessageBox.critical(self, "Xatolik", f"Faylni ishga tushirishda xatolik: {e}")
+
+    def open_external_terminal(self):
+        """Loyiha papkasida operatsion tizimning alohida tashqi terminal oynasini ochish"""
+        path = self.project_path if (self.project_path and os.path.exists(self.project_path)) else os.getcwd()
+        try:
+            if os.name == 'nt':
+                # Windows: Yangi konsol oynasida PowerShell ochish
+                CREATE_NEW_CONSOLE = 0x00000010
+                subprocess.Popen(
+                    ["powershell.exe", "-NoExit"],
+                    creationflags=CREATE_NEW_CONSOLE,
+                    cwd=path
+                )
+            elif sys.platform == 'darwin':
+                # macOS: Terminal.app ilovasida papkani ochish
+                subprocess.Popen(["open", "-a", "Terminal", path])
+            else:
+                # Linux: gnome-terminal yoki x-terminal-emulator
+                try:
+                    subprocess.Popen(["gnome-terminal", f"--working-directory={path}"])
+                except FileNotFoundError:
+                    try:
+                        subprocess.Popen(["x-terminal-emulator"], cwd=path)
+                    except FileNotFoundError:
+                        subprocess.Popen(["xterm"], cwd=path)
+            self.status_label.setText(f"Tashqi terminal ochildi: {path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Xatolik", f"Tashqi terminalni ochishda xatolik yuz berdi: {e}")
 
     def open_quick_open_dialog(self):
         """Ctrl + P tezkor fayl qidiruv modalini ochish"""

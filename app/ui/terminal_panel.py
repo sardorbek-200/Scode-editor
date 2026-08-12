@@ -1,6 +1,8 @@
 import os
+import sys
 import re
 import html
+import subprocess
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -11,7 +13,7 @@ from PyQt6.QtWidgets import (
     QTextEdit,
 )
 from PyQt6.QtGui import QCursor, QTextCursor
-from PyQt6.QtCore import Qt, QProcess, QSize
+from PyQt6.QtCore import Qt, QProcess, QProcessEnvironment, QSize
 
 from app.utils.icon_manager import IconManager
 
@@ -50,8 +52,7 @@ class CommandLineEdit(QLineEdit):
 
 class TerminalPanel(QWidget):
     """
-    Professional Integratsiyalashgan Terminal Paneli.
-    ANSI Ranglar, Avto-skroll, Buyruqlar tarixi (History) va UTF-8 QProcess boshqaruvi bilan.
+    Scode Editor uchun 100% barqaror, cmd.exe (/K) va QLineEdit input asosidagi interaktiv Terminal Paneli.
     """
 
     def __init__(self, parent=None, project_path=None):
@@ -60,7 +61,7 @@ class TerminalPanel(QWidget):
         self.process = None
 
         self._build_ui()
-        self._init_process()
+        self._start_shell_session()
 
     def _build_ui(self):
         self.setMinimumHeight(120)
@@ -121,7 +122,7 @@ class TerminalPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # 1. Yuqori ixcham sarlavha paneli
+        # 1. Yuqori sarlavha paneli
         header_widget = QWidget()
         header_widget.setObjectName("terminalHeader")
         top_layout = QHBoxLayout(header_widget)
@@ -133,7 +134,8 @@ class TerminalPanel(QWidget):
         terminal_icon_label.setPixmap(IconManager.get_pixmap("terminal", 16, 16))
         top_layout.addWidget(terminal_icon_label)
 
-        self.title_label = QLabel("TERMINAL")
+        shell_name = "CMD" if os.name == 'nt' else "BASH"
+        self.title_label = QLabel(f"TERMINAL ({shell_name})")
         self.title_label.setObjectName("terminalTitle")
         top_layout.addWidget(self.title_label)
 
@@ -141,7 +143,20 @@ class TerminalPanel(QWidget):
         self.path_label.setObjectName("terminalPath")
         top_layout.addWidget(self.path_label, 1)
 
-        # SVG Tozalash va To'xtatish tugmalari (flat icon button)
+        # Action tugmalari: Tashqi terminal, Qayta yuklash, Tozalash, To'xtatish
+        ext_terminal_btn = QPushButton(" Tashqi terminal")
+        ext_terminal_btn.setIcon(IconManager.get_icon("terminal"))
+        ext_terminal_btn.setIconSize(QSize(14, 14))
+        ext_terminal_btn.setToolTip("Loyiha papkasida operatsion tizimning alohida terminal oynasini ochish")
+        ext_terminal_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        ext_terminal_btn.clicked.connect(self.open_external_terminal)
+        top_layout.addWidget(ext_terminal_btn)
+
+        restart_btn = QPushButton(" Qayta yuklash")
+        restart_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        restart_btn.clicked.connect(self.restart_shell)
+        top_layout.addWidget(restart_btn)
+
         clear_btn = QPushButton(" Tozalash")
         clear_btn.setIcon(IconManager.get_icon("clear"))
         clear_btn.setIconSize(QSize(14, 14))
@@ -158,7 +173,7 @@ class TerminalPanel(QWidget):
 
         layout.addWidget(header_widget)
 
-        # 2. Chiqish oynasi (QTextEdit) va Input maydoni (CommandLineEdit)
+        # 2. Chiqish oynasi (read-only QTextEdit)
         console_container = QVBoxLayout()
         console_container.setSpacing(0)
         console_container.setContentsMargins(0, 0, 0, 0)
@@ -166,18 +181,19 @@ class TerminalPanel(QWidget):
         self.output_area = QTextEdit()
         self.output_area.setReadOnly(True)
         self.output_area.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
-        self.output_area.setPlaceholderText("Buyruq loglari va konsol chiqishi bu yerda ko'rinadi...")
+        self.output_area.setPlaceholderText("Doimiy cmd.exe seansi yuklanmoqda...")
         console_container.addWidget(self.output_area, 1)
 
-        # Buyruq kiritish input box ($ prompti bilan)
+        # 3. Buyruq kiritish paneli (QLineEdit)
         input_container = QHBoxLayout()
         input_container.setSpacing(0)
         input_container.setContentsMargins(0, 0, 0, 0)
 
-        prompt_label = QLabel(" $ ")
+        prompt_text = " CMD > " if os.name == 'nt' else " $ "
+        prompt_label = QLabel(prompt_text)
         prompt_label.setStyleSheet("""
             background-color: #181818;
-            color: #23d160;
+            color: #569cd6;
             font-family: "Cascadia Code", "Fira Code", Consolas, "Courier New", monospace;
             font-size: 10pt;
             font-weight: bold;
@@ -187,46 +203,115 @@ class TerminalPanel(QWidget):
         input_container.addWidget(prompt_label)
 
         self.input_line = CommandLineEdit(self)
-        self.input_line.setPlaceholderText("Buyruq kiriting (masalan: python main.py, dir, npm start)... (Tarix uchun ↑ / ↓)")
+        self.input_line.setPlaceholderText("Buyruq kiriting (masalan: dir, python main.py, cd app)... (Tarix: ↑ / ↓)")
         self.input_line.returnPressed.connect(self.run_command)
         input_container.addWidget(self.input_line, 1)
 
         console_container.addLayout(input_container)
-
         layout.addLayout(console_container, 1)
 
-    def _init_process(self):
-        """QProcess jarayonini sozlash"""
+    def _start_shell_session(self):
+        """Doimiy cmd.exe (/K) / Shell seansini QProcess orqali ishga tushirish"""
+        if self.process and self.process.state() != QProcess.ProcessState.NotRunning:
+            self.process.kill()
+            self.process.waitForFinished(1000)
+
         self.process = QProcess(self)
         self.process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
+
+        env = QProcessEnvironment.systemEnvironment()
+        env.insert("PYTHONUNBUFFERED", "1")
+        env.insert("FORCE_COLOR", "1")
+        self.process.setProcessEnvironment(env)
+
+        self.process.setWorkingDirectory(self.project_path)
+
         self.process.readyReadStandardOutput.connect(self._handle_stdout)
         self.process.readyReadStandardError.connect(self._handle_stderr)
         self.process.finished.connect(self._handle_finished)
 
+        if os.name == 'nt':
+            # Windows: cmd.exe /K
+            self.process.start("cmd.exe", ["/K"])
+        else:
+            # macOS / Linux: Interaktiv shell
+            shell = os.environ.get("SHELL", "/bin/bash")
+            self.process.start(shell, ["-i"])
+
+    def restart_shell(self):
+        """Shell seansini yangidan ishga tushirish"""
+        self.clear_output()
+        self._append_html_and_scroll("<span style='color: #e5c07b;'><i>🔄 Shell seansi qayta yuklanmoqda...</i></span><br>")
+        self._start_shell_session()
+
+    def open_external_terminal(self):
+        """Loyiha papkasida operatsion tizimning alohida tashqi terminal oynasini ochish"""
+        try:
+            path = self.project_path if (self.project_path and os.path.exists(self.project_path)) else os.getcwd()
+
+            if os.name == 'nt':
+                # Windows: Yangi konsol oynasida PowerShell/CMD ochish
+                CREATE_NEW_CONSOLE = 0x00000010
+                subprocess.Popen(
+                    ["powershell.exe", "-NoExit"],
+                    creationflags=CREATE_NEW_CONSOLE,
+                    cwd=path
+                )
+            elif sys.platform == 'darwin':
+                # macOS: Terminal.app ilovasida papkani ochish
+                subprocess.Popen(["open", "-a", "Terminal", path])
+            else:
+                # Linux: gnome-terminal yoki x-terminal-emulator
+                try:
+                    subprocess.Popen(["gnome-terminal", f"--working-directory={path}"])
+                except FileNotFoundError:
+                    try:
+                        subprocess.Popen(["x-terminal-emulator"], cwd=path)
+                    except FileNotFoundError:
+                        subprocess.Popen(["xterm"], cwd=path)
+        except Exception as e:
+            self._append_html_and_scroll(f"<span style='color: #f48771;'><b>⚠ Tashqi terminalni ochishda xatolik: {html.escape(str(e))}</b></span><br>")
+
     def set_project_path(self, path: str):
+        """Loyiha papkasi o'zgarganda shell ichida 'cd' bajarish"""
         if path and os.path.exists(path):
-            self.project_path = path
+            self.project_path = os.path.abspath(path)
             self.path_label.setText(f"[{self.project_path}]")
+            if self.process and self.process.state() == QProcess.ProcessState.Running:
+                cd_cmd = f'cd /d "{self.project_path}"\n' if os.name == 'nt' else f'cd "{self.project_path}"\n'
+                self.process.write(cd_cmd.encode("utf-8"))
 
     def _append_html_and_scroll(self, html_text: str):
-        """Matnni HTML formatida qo'shish va avtomatik ravishda eng pastga skroll qilish"""
+        """Matnni HTML formatida kiritish va pastga skroll qilish"""
+        self.output_area.moveCursor(QTextCursor.MoveOperation.End)
         self.output_area.append(html_text)
         self.output_area.moveCursor(QTextCursor.MoveOperation.End)
         self.output_area.ensureCursorVisible()
 
     @staticmethod
     def ansi_to_html(text: str) -> str:
-        """ANSI escape rang kodlarini HTML / RichText formatiga o'tkazish"""
+        """ANSI escape rang kodlarini HTML formatiga o'tkazish"""
         if not text:
             return ""
 
-        escaped = html.escape(text)
+        cleaned = re.sub(r'\x1b\[[?#;0-9]*[a-ln-zA-LN-Z]', '', text)
+        cleaned = re.sub(r'\x1b[\(\)][A-Z]', '', cleaned)
+        cleaned = cleaned.replace('\r\n', '\n').replace('\r', '')
+
+        escaped = html.escape(cleaned)
 
         ansi_colors = {
             '30': '#000000', '31': '#f44747', '32': '#23d160', '33': '#e5c07b',
             '34': '#569cd6', '35': '#c586c0', '36': '#4ec9b0', '37': '#cccccc',
             '90': '#777777', '91': '#f48771', '92': '#4ec9b0', '93': '#f5d76e',
             '94': '#569cd6', '95': '#c586c0', '96': '#4ec9b0', '97': '#ffffff'
+        }
+
+        ansi_bg_colors = {
+            '40': '#000000', '41': '#5a1d1d', '42': '#1b4b27', '43': '#5a4b1d',
+            '44': '#1d3b5a', '45': '#4b1d5a', '46': '#1d5a5a', '47': '#444444',
+            '100': '#333333', '101': '#7a2d2d', '102': '#2b6b37', '103': '#7a6b2d',
+            '104': '#2d4b7a', '105': '#6b2d7a', '106': '#2d7a7a', '107': '#666666'
         }
 
         def _replace_ansi(match):
@@ -237,6 +322,8 @@ class TerminalPanel(QWidget):
                     return '</span>'
                 elif code in ansi_colors:
                     styles.append(f'color: {ansi_colors[code]}')
+                elif code in ansi_bg_colors:
+                    styles.append(f'background-color: {ansi_bg_colors[code]}')
                 elif code == '1':
                     styles.append('font-weight: bold')
                 elif code == '4':
@@ -246,66 +333,58 @@ class TerminalPanel(QWidget):
                 return f'<span style="{style_str}">'
             return ''
 
-        # Barcha rang bo'lmagan boshqaruv belgilarni olib tashlash (\x1b[K, \x1b[2J va h.k.)
-        cleaned = re.sub(r'\x1b\[[0-9;]*[a-zA-D-z]', '', escaped)
-        # SGR rang kodlarini HTML span teglari bilan almashtirish
-        result = re.sub(r'\x1b\[([0-9;]*)m', _replace_ansi, cleaned)
+        result = re.sub(r'\x1b\[([0-9;]*)m', _replace_ansi, escaped)
+        result = re.sub(r'\x1b\[[^\x1b]*[a-zA-Z]', '', result)
+        result = result.replace('\n', '<br>')
         return result
 
     def execute_command(self, cmd: str):
-        """Tashqi vidjetdan buyruq yuborilganda bajarish (▶ Run tugmasi)"""
+        """Tashqi vidjetdan (▶ Run tugmasi) buyruq yuborish"""
         if not cmd:
             return
         self.input_line.setText(cmd)
         self.run_command()
 
     def run_command(self):
-        """Enter bosilganda buyruqni bajarish va tarixga saqlash"""
+        """Enter bosilganda buyruqni doimiy cmd.exe seansiga yuborish"""
         cmd = self.input_line.text().strip()
+
+        if not self.process or self.process.state() == QProcess.ProcessState.NotRunning:
+            self._start_shell_session()
+
         if not cmd:
             return
 
-        # Tarixga saqlash va inputni tozalash
         self.input_line.add_to_history(cmd)
         self.input_line.clear()
 
         if cmd.lower() in ["cls", "clear"]:
             self.clear_output()
+            self.process.write((cmd + "\n").encode("utf-8"))
             return
 
-        # Buyruqni terminal oynasida ko'k/sariq rangda chiqarish ($ npm i)
         cmd_html = f"<span style='color: #4ec9b0; font-weight: bold;'>$ {html.escape(cmd)}</span>"
         self._append_html_and_scroll(cmd_html)
 
-        if self.process.state() != QProcess.ProcessState.NotRunning:
-            self._append_html_and_scroll("<span style='color: #e5c07b;'>Boshqa jarayon bajarilmoqda. Uni to'xtatish uchun 'To'xtatish' tugmasini bosing.</span>")
-            return
-
-        self.process.setWorkingDirectory(self.project_path)
-
-        # Standart Shell orqali buyruqni berish
-        if os.name == 'nt':
-            self.process.start("cmd.exe", ["/c", cmd])
-        else:
-            self.process.start("sh", ["-c", cmd])
+        self.process.write((cmd + "\n").encode("utf-8"))
 
     def _handle_stdout(self):
         data = self.process.readAllStandardOutput().data()
         text = self._decode_output(data)
-        if text.strip():
-            formatted_html = self.ansi_to_html(text.rstrip("\r\n"))
+        if text:
+            formatted_html = self.ansi_to_html(text)
             self._append_html_and_scroll(formatted_html)
 
     def _handle_stderr(self):
         data = self.process.readAllStandardError().data()
         text = self._decode_output(data)
-        if text.strip():
-            formatted = self.ansi_to_html(text.rstrip("\r\n"))
+        if text:
+            formatted = self.ansi_to_html(text)
             err_html = f"<span style='color: #f48771;'>{formatted}</span>"
             self._append_html_and_scroll(err_html)
 
     def _handle_finished(self, exit_code, exit_status):
-        self._append_html_and_scroll(f"<span style='color: #6a9955;'><i>[Jarayon yakunlandi (Exit code: {exit_code})]</i></span>")
+        self._append_html_and_scroll(f"<span style='color: #6a9955;'><i>[Shell seansi yakunlandi (Exit code: {exit_code})]</i></span>")
 
     def _decode_output(self, data: bytes) -> str:
         if not data:
@@ -324,4 +403,5 @@ class TerminalPanel(QWidget):
     def stop_process(self):
         if self.process and self.process.state() != QProcess.ProcessState.NotRunning:
             self.process.kill()
-            self._append_html_and_scroll("<span style='color: #f44747;'><b>⛔ Jarayon majburiy to'xtatildi!</b></span>")
+            self.process.waitForFinished(1000)
+            self._append_html_and_scroll("<span style='color: #f44747;'><b>⛔ cmd.exe seansi to'xtatildi!</b></span>")
