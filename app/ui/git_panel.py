@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
     QDialog,
     QFormLayout,
 )
-from PyQt6.QtGui import QCursor, QColor
+from PyQt6.QtGui import QCursor, QColor, QTextCursor
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
 from app.utils.icon_manager import IconManager
@@ -188,7 +188,7 @@ class GitCommandThread(QThread):
                 env=env,
             )
 
-            stdout, stderr = self.proc.communicate(timeout=30)
+            stdout, stderr = self.proc.communicate(timeout=90)
 
             if stdout:
                 for line in stdout.splitlines():
@@ -207,7 +207,7 @@ class GitCommandThread(QThread):
         except subprocess.TimeoutExpired:
             if self.proc:
                 self.proc.kill()
-            self.output_line.emit("Xatolik: Git buyrug'i vaqti tugadi (Timeout: 30s). Serverga ulanishni tekshiring!", True)
+            self.output_line.emit("Xatolik: Git buyrug'i vaqti tugadi (Timeout: 90s). Serverga ulanishni tekshiring!", True)
             self.finished.emit(1)
         except Exception as exc:
             self.output_line.emit(f"Xatolik: {exc}", True)
@@ -251,82 +251,122 @@ class GitPanel(QWidget):
     def _build_ui(self):
         self.setStyleSheet("""
             QWidget {
-                background-color: #1e1e1e;
-                color: #cccccc;
+                background-color: #18181b;
+                color: #e4e4e7;
                 font-family: "Segoe UI", sans-serif;
             }
+            QLabel {
+                color: #e4e4e7;
+            }
             QGroupBox {
-                border: 1px solid #2d2d2d;
-                border-radius: 4px;
-                margin-top: 6px;
-                font-size: 11px;
-                font-weight: bold;
-                color: #569cd6;
+                border: 1px solid #2f2f36;
+                border-radius: 8px;
+                margin-top: 8px;
+                font-size: 10px;
+                font-weight: 700;
+                color: #a1a1aa;
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 8px;
-                padding: 0 4px;
+                left: 12px;
+                padding: 0 6px;
             }
             QListWidget {
-                background-color: #181818;
-                border: 1px solid #2d2d2d;
-                border-radius: 4px;
-                color: #cccccc;
-                font-family: "Cascadia Code", Consolas, monospace;
+                background-color: #1f1f23;
+                border: 1px solid #2f2f36;
+                border-radius: 8px;
+                color: #f4f4f5;
+                font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
                 font-size: 11px;
+                outline: none;
             }
             QListWidget::item {
-                padding: 4px 6px;
+                border-radius: 6px;
+                padding: 7px 8px;
+                margin: 2px 4px;
             }
             QListWidget::item:hover {
-                background-color: #2a2d2e;
+                background-color: rgba(59, 130, 246, 0.12);
+                border: 1px solid rgba(59, 130, 246, 0.2);
             }
             QListWidget::item:selected {
-                background-color: #04395e;
+                background-color: rgba(59, 130, 246, 0.2);
+                border: 1px solid rgba(59, 130, 246, 0.4);
                 color: #ffffff;
             }
             QLineEdit {
-                background-color: #252526;
-                color: #ffffff;
-                border: 1px solid #3c3c3c;
-                border-radius: 4px;
-                padding: 6px 8px;
+                background-color: #202127;
+                color: #f4f4f5;
+                border: 1px solid #374151;
+                border-radius: 6px;
+                padding: 8px 10px;
+                min-height: 32px;
                 font-size: 12px;
             }
             QLineEdit:focus {
-                border-color: #007acc;
+                border-color: #3b82f6;
             }
             QPushButton {
-                background-color: #0e639c;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 12px;
+                background-color: #0f172a;
+                color: #e2e8f0;
+                border: 1px solid #374151;
+                border-radius: 6px;
+                padding: 4px 12px;
+                min-height: 32px;
                 font-size: 11px;
-                font-weight: 500;
+                font-weight: 600;
             }
             QPushButton:hover {
-                background-color: #1177bb;
+                background-color: #1f2937;
+                border-color: #4b5563;
             }
             QPushButton:pressed {
-                background-color: #094771;
+                background-color: #111827;
+            }
+            QPushButton#primaryBtn {
+                background-color: #0284c7;
+                border-color: #0284c7;
+                color: #ecfeff;
+            }
+            QPushButton#primaryBtn:hover {
+                background-color: #0369a1;
+                border-color: #0369a1;
             }
             QPushButton#secondaryBtn {
-                background-color: #252526;
-                color: #cccccc;
-                border: 1px solid #3c3c3c;
+                background-color: rgba(255, 255, 255, 0.02);
+                border: 1px solid #374151;
+                color: #d4d4d8;
             }
             QPushButton#secondaryBtn:hover {
-                background-color: #37373d;
-                color: #ffffff;
+                background-color: rgba(255, 255, 255, 0.06);
+                border-color: #4b5563;
+            }
+            QLabel#branchChip {
+                background-color: rgba(16, 185, 129, 0.12);
+                color: #6ee7b7;
+                border: 1px solid rgba(16, 185, 129, 0.35);
+                border-radius: 999px;
+                padding: 4px 10px;
+                font-size: 10px;
+                font-weight: 700;
+            }
+            QLabel#repoChip {
+                background-color: rgba(148, 163, 184, 0.08);
+                color: #cbd5e1;
+                border: 1px solid rgba(148, 163, 184, 0.15);
+                border-radius: 999px;
+                padding: 4px 10px;
+                font-size: 10px;
             }
             QTextEdit#gitLog {
-                background-color: #141414;
-                color: #cccccc;
-                border: 1px solid #2d2d2d;
-                font-family: "Cascadia Code", Consolas, monospace;
-                font-size: 10pt;
+                background-color: #111827;
+                color: #dbeafe;
+                border: 1px solid #2f2f36;
+                border-radius: 8px;
+                font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
+                font-size: 10.5pt;
             }
         """)
 
@@ -334,37 +374,35 @@ class GitPanel(QWidget):
         main_layout.setContentsMargins(8, 8, 8, 8)
         main_layout.setSpacing(8)
 
-        # 1. Top Header
         header_layout = QHBoxLayout()
         header_layout.setSpacing(8)
 
-        title_label = QLabel("GIT SOURCE CONTROL")
-        title_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #ffffff;")
+        title_label = QLabel("MANBA BOSHQARUVI")
+        title_label.setStyleSheet("font-weight: 700; font-size: 12px; color: #f4f4f5; letter-spacing: 0.08em;")
         header_layout.addWidget(title_label)
 
-        self.branch_label = QLabel("Branch: main")
-        self.branch_label.setStyleSheet("color: #4ec9b0; font-size: 11px; font-weight: bold;")
+        self.branch_label = QLabel("main")
+        self.branch_label.setObjectName("branchChip")
         header_layout.addWidget(self.branch_label)
 
-        self.path_label = QLabel(f"[{self.project_path}]")
-        self.path_label.setStyleSheet("color: #777777; font-size: 10px;")
+        self.path_label = QLabel(f"{os.path.basename(self.project_path) or 'loyiha'}")
+        self.path_label.setObjectName("repoChip")
         header_layout.addWidget(self.path_label, 1)
 
-        setup_btn = QPushButton(" Git Sozlash (Remote Wizard)")
+        setup_btn = QPushButton("Remote")
         setup_btn.setObjectName("secondaryBtn")
         setup_btn.setToolTip("GitHub Repository URL va Branch nomini sozlash")
         setup_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         setup_btn.clicked.connect(self.run_first_time_setup_dialog)
         header_layout.addWidget(setup_btn)
 
-        refresh_btn = QPushButton(" Yangilash")
-        refresh_btn.setIcon(IconManager.get_icon("clear"))
+        refresh_btn = QPushButton("Refresh")
         refresh_btn.setObjectName("secondaryBtn")
         refresh_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         refresh_btn.clicked.connect(self.refresh_git_status)
         header_layout.addWidget(refresh_btn)
 
-        gitignore_btn = QPushButton(" Auto .gitignore")
+        gitignore_btn = QPushButton("Auto .gitignore")
         gitignore_btn.setObjectName("secondaryBtn")
         gitignore_btn.setToolTip("Loyiha turiga ko'ra mos .gitignore faylini yaratish")
         gitignore_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
@@ -373,7 +411,6 @@ class GitPanel(QWidget):
 
         main_layout.addLayout(header_layout)
 
-        # Splitter
         splitter = QSplitter(Qt.Orientation.Vertical)
 
         top_container = QWidget()
@@ -381,17 +418,17 @@ class GitPanel(QWidget):
         top_layout.setContentsMargins(0, 0, 0, 0)
         top_layout.setSpacing(8)
 
-        # 2. O'zgargan fayllar ro'yxati
-        status_group = QGroupBox(" O'ZGARGANI FAYLLAR (CHANGES)")
+        status_group = QGroupBox("O'ZGARISHLAR")
         status_vbox = QVBoxLayout(status_group)
         status_vbox.setContentsMargins(6, 6, 6, 6)
 
         self.file_list = QListWidget()
+        self.file_list.setUniformItemSizes(True)
         status_vbox.addWidget(self.file_list, 1)
 
         stage_btn_layout = QHBoxLayout()
 
-        self.init_btn = QPushButton(" Git Init (Repozitoriy Yaratish)")
+        self.init_btn = QPushButton("Git Init")
         self.init_btn.setObjectName("secondaryBtn")
         self.init_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.init_btn.clicked.connect(self.git_init_repo)
@@ -399,7 +436,8 @@ class GitPanel(QWidget):
 
         stage_btn_layout.addStretch()
 
-        self.stage_all_btn = QPushButton(" Barchasini Sahnalashtirish (Git Add .)")
+        self.stage_all_btn = QPushButton("Stage All")
+        self.stage_all_btn.setObjectName("secondaryBtn")
         self.stage_all_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.stage_all_btn.clicked.connect(self.git_add_all)
         stage_btn_layout.addWidget(self.stage_all_btn)
@@ -407,18 +445,19 @@ class GitPanel(QWidget):
         status_vbox.addLayout(stage_btn_layout)
         top_layout.addWidget(status_group, 1)
 
-        # 3. Commit Section
-        commit_group = QGroupBox(" COMMIT BO'LIMI")
+        commit_group = QGroupBox("COMMIT")
         commit_vbox = QVBoxLayout(commit_group)
         commit_vbox.setContentsMargins(6, 6, 6, 6)
 
         commit_input_layout = QHBoxLayout()
+        commit_input_layout.setSpacing(8)
         self.commit_msg_input = QLineEdit()
-        self.commit_msg_input.setPlaceholderText("Commit xabarini kiriting (masalan: feat: add new feature)...")
+        self.commit_msg_input.setPlaceholderText("Commit xabari...")
         self.commit_msg_input.returnPressed.connect(self.git_commit)
         commit_input_layout.addWidget(self.commit_msg_input, 1)
 
-        commit_btn = QPushButton(" Commit qilish")
+        commit_btn = QPushButton("Commit")
+        commit_btn.setObjectName("primaryBtn")
         commit_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         commit_btn.clicked.connect(self.git_commit)
         commit_input_layout.addWidget(commit_btn)
@@ -426,33 +465,34 @@ class GitPanel(QWidget):
         commit_vbox.addLayout(commit_input_layout)
         top_layout.addWidget(commit_group)
 
-        # 4. Push, Pull & Tag Boshqaruvi
-        sync_group = QGroupBox(" SERVER VA TAGLAR (SYNC & TAGS)")
+        sync_group = QGroupBox("SINXRONLAŞ")
         sync_vbox = QVBoxLayout(sync_group)
         sync_vbox.setContentsMargins(6, 6, 6, 6)
 
         sync_btn_layout = QHBoxLayout()
+        sync_btn_layout.setSpacing(8)
 
-        pull_btn = QPushButton(" ⬇ Git Pull")
+        pull_btn = QPushButton("Pull")
         pull_btn.setObjectName("secondaryBtn")
         pull_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         pull_btn.clicked.connect(self.git_pull)
         sync_btn_layout.addWidget(pull_btn)
 
-        push_btn = QPushButton(" ⬆ Git Push")
+        push_btn = QPushButton("Push")
+        push_btn.setObjectName("primaryBtn")
         push_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         push_btn.clicked.connect(self.git_push)
         sync_btn_layout.addWidget(push_btn)
 
-        sync_btn_layout.addSpacing(16)
+        sync_btn_layout.addStretch()
 
-        tag_create_btn = QPushButton(" Tag Yaratish")
+        tag_create_btn = QPushButton("Tag")
         tag_create_btn.setObjectName("secondaryBtn")
         tag_create_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         tag_create_btn.clicked.connect(self.git_create_tag)
         sync_btn_layout.addWidget(tag_create_btn)
 
-        push_tags_btn = QPushButton(" Push Tags")
+        push_tags_btn = QPushButton("Push Tags")
         push_tags_btn.setObjectName("secondaryBtn")
         push_tags_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         push_tags_btn.clicked.connect(self.git_push_tags)
@@ -463,20 +503,38 @@ class GitPanel(QWidget):
 
         splitter.addWidget(top_container)
 
-        # 5. Git konsol chiqishi
         self.log_area = QTextEdit()
         self.log_area.setObjectName("gitLog")
         self.log_area.setReadOnly(True)
-        self.log_area.setPlaceholderText("Git amallari va natijalari shu yerda ko'rinadi...")
+        self.log_area.setPlaceholderText("Git output ...")
+        self.log_area.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         splitter.addWidget(self.log_area)
 
-        splitter.setSizes([320, 120])
+        splitter.setSizes([330, 120])
         main_layout.addWidget(splitter, 1)
 
     def _log(self, text: str, is_error: bool = False):
-        color = "#f48771" if is_error else "#23d160"
-        formatted = f"<span style='color: {color};'><b>></b> {html.escape(text)}</span><br>"
+        if not text:
+            return
+
+        safe = html.escape(text)
+        if "git " in text.lower():
+            safe = safe.replace("git ", "<span style='color: #4ade80;'>git </span>", 1)
+
+        if "Bajarilmoqda:" in text:
+            safe = safe.replace("Bajarilmoqda:", "<span style='color: #93c5fd;'>Bajarilmoqda:</span>", 1)
+
+        if ">" in text and "Bajarilmoqda:" not in text:
+            safe = safe.replace(">", "<span style='color: #4ade80;'>&gt;</span>", 1)
+
+        if is_error:
+            color = "#f87171"
+        else:
+            color = "#22c55e"
+
+        formatted = f"<span style='color: {color};'>{safe}</span><br>"
         self.log_area.append(formatted)
+        self.log_area.moveCursor(QTextCursor.MoveOperation.End)
 
     def run_git_command(self, args: list, callback=None):
         """Git buyrug'ini xavfsiz ishga tushirish"""
@@ -582,46 +640,55 @@ class GitPanel(QWidget):
         self.file_list.clear()
 
         if not self.check_git_initialized():
-            item = QListWidgetItem(" Git repozitoriyasi topilmadi (.git yo'q). 'Git Init' tugmasini bosing.")
-            item.setForeground(QColor("#f44747"))
+            item = QListWidgetItem("Git repo topilmadi. Git Init tugmasini bosing.")
+            item.setForeground(QColor("#fca5a5"))
             self.file_list.addItem(item)
-            self.branch_label.setText("Branch: (Yo'q)")
+            self.branch_label.setText("(no repo)")
             return
 
         def _on_branch(stdout, stderr, code):
             branch = stdout.strip() or "main / master"
-            self.branch_label.setText(f"Branch: {branch}")
+            self.branch_label.setText(branch)
 
         self.run_git_command(["branch", "--show-current"], _on_branch)
 
         def _on_status(stdout, stderr, code):
             if code != 0:
-                self.file_list.addItem(" Git status olishda xatolik yuz berdi")
+                item = QListWidgetItem("Git holatini olishda xatolik yuz berdi.")
+                item.setForeground(QColor("#fca5a5"))
+                self.file_list.addItem(item)
                 return
 
             lines = stdout.splitlines()
             if not lines:
-                item = QListWidgetItem(" Repozitoriy toza (O'zgarishlar yo'q)")
-                item.setForeground(QColor("#4ec9b0"))
+                item = QListWidgetItem("Repo toza — mahalliy o'zgarishlar yo'q.")
+                item.setForeground(QColor("#6ee7b7"))
                 self.file_list.addItem(item)
                 return
 
             for line in lines:
-                if len(line) >= 3:
-                    status_code = line[:2]
-                    file_path = line[3:]
-                    item = QListWidgetItem(f"[{status_code.strip()}]  {file_path}")
+                if len(line) < 3:
+                    continue
 
-                    if 'M' in status_code:
-                        item.setForeground(QColor("#e5c07b"))
-                    elif 'A' in status_code:
-                        item.setForeground(QColor("#23d160"))
-                    elif '?' in status_code:
-                        item.setForeground(QColor("#569cd6"))
-                    elif 'D' in status_code:
-                        item.setForeground(QColor("#f44747"))
+                status_code = line[:2]
+                file_path = line[3:]
+                status_val = status_code.strip() or "?"
 
-                    self.file_list.addItem(item)
+                item = QListWidgetItem(f"{file_path} [{status_val}]")
+                if status_val.startswith("M"):
+                    item.setForeground(QColor("#eab308"))
+                elif status_val.startswith("D"):
+                    item.setForeground(QColor("#ef4444"))
+                elif status_val.startswith("A"):
+                    item.setForeground(QColor("#22c55e"))
+                elif status_val.startswith("??") or status_val.startswith("?"):
+                    item.setForeground(QColor("#38bdf8"))
+                elif status_val.startswith("U"):
+                    item.setForeground(QColor("#f97316"))
+                else:
+                    item.setForeground(QColor("#e4e4e7"))
+
+                self.file_list.addItem(item)
 
         self.run_git_command(["status", "--porcelain"], _on_status)
 
@@ -677,16 +744,37 @@ class GitPanel(QWidget):
         self.run_git_command(["push", "-u", "origin", "HEAD"], _after_push)
 
     def git_pull(self):
-        """git pull"""
+        """git pull; agar upstream yo'q bo'lsa, avval uni o'rnatib, keyin pull ishlatish."""
         if not self.check_git_initialized():
             QMessageBox.warning(self, "Ogohlantirish", "Avval Git repozitoriyasini va Remote URL ni sozlang!")
             return
 
         def _after_pull(stdout, stderr, code):
+            combined = (stdout or "") + "\n" + (stderr or "")
             if code == 0:
                 self._log("Serverdan yangiliklar tortib olindi (pull)!")
-            else:
-                self._log("Pull qilishda xatolik yuz berdi!", is_error=True)
+                self.refresh_git_status()
+                return
+
+            lower = combined.lower()
+            if "there is no tracking information" in lower or "no upstream" in lower or "no tracking information" in lower:
+                self._log("Tracking ma'lumotlari yo'q. Upstream avtomatik o'rnatilmoqda...", is_error=False)
+
+                def _after_set_upstream(stdout2, stderr2, code2):
+                    if code2 == 0:
+                        self._log("Upstream muvoffaqiyatli o'rnatildi. Pull qayta bajarilmoqda...")
+                        self.run_git_command(["pull"], _after_pull)
+                    else:
+                        self._log("Upstream o'rnatib bo'lmadi. Git remote va branch sozlamalarini tekshiring.", is_error=True)
+
+                def _on_branch(stdout_branch, stderr_branch, code_branch):
+                    branch = (stdout_branch or "").strip() or "main"
+                    self.run_git_command(["branch", "--set-upstream-to=origin/" + branch, branch], _after_set_upstream)
+
+                self.run_git_command(["branch", "--show-current"], _on_branch)
+                return
+
+            self._log("Pull qilishda xatolik yuz berdi!", is_error=True)
             self.refresh_git_status()
 
         self.run_git_command(["pull"], _after_pull)

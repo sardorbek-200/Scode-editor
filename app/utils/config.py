@@ -97,18 +97,29 @@ class ConfigManager:
             print(f"Index nomini yangilashda xatolik: {e}")
 
     def remove_project(self, project_path):
-        """Loyihani konfiguratsiya va ro'yxatdan o'chirish (diskdagi fayllar o'chmaydi)"""
+        """Loyihani konfiguratsiya, ikonka va ro'yxatdan to'liq o'chirish (diskdagi asl manba fayllar o'chmaydi)"""
         if not project_path:
             return
         project_id = self._get_project_id(project_path)
         project_file = os.path.join(self.projects_dir, f"{project_id}.json")
 
+        # 1. Config JSON faylini o'chirish
         if os.path.exists(project_file):
             try:
                 os.remove(project_file)
             except Exception as e:
                 print(f"Loyiha config faylini o'chirishda xatolik: {e}")
 
+        # 2. AppData/Local/ScodeEditor/assets/icons ichidagi ikonkalarni o'chirish
+        if hasattr(self, 'icons_dir') and os.path.exists(self.icons_dir):
+            for file in os.listdir(self.icons_dir):
+                if file.startswith(project_id):
+                    try:
+                        os.remove(os.path.join(self.icons_dir, file))
+                    except Exception:
+                        pass
+
+        # 3. Index.json faylidan o'chirish
         recent = self.get_recent_projects()
         recent = [p for p in recent if p.get("path") != project_path and p.get("id") != project_id]
         try:

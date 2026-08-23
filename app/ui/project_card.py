@@ -191,22 +191,27 @@ class ProjectCard(QFrame):
                 QMessageBox.critical(self, "Xatolik", f"Loyiha nomini saqlashda xatolik: {e}")
 
     def delete_project(self):
-        """QMessageBox.question orqali tasdiq so'rab, loyihani ro'yxatdan o'chirish"""
+        """5-soniyalik bekor qilish (Undo) dialogi bilan loyihani AppData'dan o'chirish"""
         proj_name = self.project_info.get("name", os.path.basename(self.project_info['path']))
-        reply = QMessageBox.question(
-            self,
-            "Loyihani o'chirish",
-            f"'{proj_name}' loyihasini ro'yxatdan o'chirishni tasdiqlaysizmi?\n\n(Eslatma: Diskdagi fayllaringiz o'chirilmaydi)",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                self.config.remove_project(self.project_info['path'])
-                if self.on_refresh:
-                    self.on_refresh()
-            except Exception as e:
-                QMessageBox.critical(self, "Xatolik", f"Loyihani o'chirishda xatolik: {e}")
+        proj_path = self.project_info['path']
+
+        from app.ui.undo_delete_dialog import UndoDeleteDialog
+        from app.utils.cache_manager import CacheDeleteWorker
+        from PyQt6.QtWidgets import QDialog
+
+        dialog = UndoDeleteDialog(proj_name, proj_path, parent=self.window())
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # 5 soniya ichida bekor qilinmasa => AppData ichidagi kesh va json fayllarini tozalash (Asl papka saqlanadi)
+            self.delete_worker = CacheDeleteWorker(proj_path)
+            self.delete_worker.finished_signal.connect(self._on_delete_finished)
+            self.delete_worker.start()
+
+    def _on_delete_finished(self, success, msg):
+        if success:
+            if self.on_refresh:
+                self.on_refresh()
+        else:
+            QMessageBox.critical(self, "Xatolik", msg)
 
     def update_icon_display(self):
         """Ikonkani SVG yoki rasm sifatini ko'rsatish"""

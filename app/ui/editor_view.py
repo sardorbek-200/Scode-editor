@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import shutil
 import subprocess
@@ -11,9 +12,11 @@ from PyQt6.Qsci import (
     QsciLexerHTML,
     QsciLexerCSS,
     QsciLexerCPP,
+    QsciLexerJSON,
+    QsciLexerXML,
 )
-from PyQt6.QtCore import Qt, QDir, QTimer, QSize, QUrl
-from PyQt6.QtGui import QCursor, QKeySequence, QShortcut, QColor, QFont, QDesktopServices
+from PyQt6.QtCore import Qt, QDir, QTimer, QSize, QUrl, QModelIndex
+from PyQt6.QtGui import QCursor, QKeySequence, QShortcut, QColor, QFont, QDesktopServices, QPainter, QPen
 
 def apply_lexer_for_file(editor, filepath: str):
     """
@@ -22,19 +25,26 @@ def apply_lexer_for_file(editor, filepath: str):
     if not editor or not filepath:
         return
 
-    ext = os.path.splitext(filepath)[1].lower()
+    ext = os.path.splitext(filepath)[1].lower().lstrip('.')
     font = QFont("Consolas", 11)
 
     lexer = None
-    if ext in ['.html', '.htm', '.xml']:
+    if ext in ['html', 'htm']:
         lexer = QsciLexerHTML(editor)
-    elif ext == '.py':
+    elif ext in ['py', 'pyw']:
         lexer = QsciLexerPython(editor)
-    elif ext in ['.js', '.jsx', '.ts', '.tsx', '.json']:
+    elif ext in ['jsx', 'tsx']:
+        from app.ui.editor_scintilla import JSXCustomLexer
+        lexer = JSXCustomLexer(editor)
+    elif ext in ['js', 'ts']:
         lexer = QsciLexerJavaScript(editor)
-    elif ext in ['.css', '.scss', '.less']:
+    elif ext == 'json':
+        lexer = QsciLexerJSON(editor)
+    elif ext in ['css', 'scss', 'less']:
         lexer = QsciLexerCSS(editor)
-    elif ext in ['.cpp', '.c', '.h', '.hpp', '.cs']:
+    elif ext in ['xml', 'svg']:
+        lexer = QsciLexerXML(editor)
+    elif ext in ['cpp', 'c', 'h', 'hpp', 'cs']:
         lexer = QsciLexerCPP(editor)
 
     if lexer:
@@ -48,7 +58,6 @@ def apply_lexer_for_file(editor, filepath: str):
         lexer.setPaper(dark_bg, QsciScintilla.STYLE_LINENUMBER)
         lexer.setColor(margin_fg, QsciScintilla.STYLE_LINENUMBER)
 
-        # Lexer Garbage Collector tomonidan o'chirilmasligi uchun editor.current_lexer ga bog'laymiz
         editor.current_lexer = lexer
         editor.set_lexer_for_file(filepath)
     else:
@@ -58,10 +67,12 @@ def apply_lexer_for_file(editor, filepath: str):
     if hasattr(editor, "_enforce_dark_margins"):
         editor._enforce_dark_margins()
 from PyQt6.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QSplitter,
     QTabWidget,
     QTreeView,
@@ -81,19 +92,70 @@ from app.utils.installer import PackageInstallerThread
 from app.utils.icon_manager import IconManager
 from app.utils.config import ConfigManager
 from app.ui.editor_scintilla import ScodeScintillaEditor
+from app.ui.smart_editor_mixin import SmartEditorMixin, ScodeTextEdit
+from app.ui.smart_keybinding_palette_mixin import SmartKeyBindingAndPaletteMixin
+from app.ui.vscode_editor_mixins import (
+    PersistenceMixin,
+    SplitViewMixin,
+    FloatingOverlaysMixin,
+    EditorCommandsMixin,
+)
 from app.ui.terminal_panel import TerminalPanel
 from app.ui.search_panel import SearchPanel
 from app.ui.quick_open import QuickOpenDialog
 from app.ui.settings_dialog import SettingsDialog
+from app.ui.tree_icon_provider import ScodeTreeIconProvider, ScodeFileSystemModel
+from app.ui.custom_file_explorer import CustomFileExplorer
+from app.ui.breadcrumbs_bar import BreadcrumbsBar
+from app.core.backup_manager import AutoSaveBackupManager
+from app.ui.editor_tabs import EditorTabWidget, EditorTabsManager
+
+
+
+
+class MinimapViewportOverlay(QWidget):
+    """Minimap ichidagi hozirgi ko'rinish maydonini ko'rsatadigan yarim shaffof overlay."""
+
+    def __init__(self, minimap: QsciScintilla):
+        super().__init__(minimap)
+        self.minimap = minimap
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.raise_()
+
+    def paintEvent(self, event):
+        if not self.minimap or not self.minimap.isVisible():
+            return
+
+        total_lines = max(1, self.minimap.lines())
+        scroll_bar = self.minimap.verticalScrollBar()
+        scroll_max = max(1, scroll_bar.maximum() if scroll_bar is not None else 1)
+        visible_lines = max(1, int((self.minimap.height() / max(1, self.minimap.fontMetrics().height()))))
+        visible_lines = min(visible_lines, total_lines)
+        if total_lines <= visible_lines:
+            return
+
+        visible_ratio = max(0.08, min(1.0, visible_lines / total_lines))
+        current_top = max(0, min(int((scroll_bar.value() if scroll_bar is not None else 0) * total_lines / scroll_max), total_lines - visible_lines))
+        viewport_top = int((current_top / max(1, total_lines - visible_lines)) * max(0, self.height() - 1))
+        viewport_height = max(18, int(self.height() * visible_ratio))
+        viewport_height = min(viewport_height, self.height() - viewport_top)
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor(255, 255, 255, 38), 1))
+        painter.setBrush(QColor(255, 255, 255, 18))
+        painter.drawRect(1, viewport_top + 1, self.width() - 3, max(12, viewport_height - 2))
 
 
 class EditorTabContainer(QWidget):
     """Redaktor va o'ng tomondagi Mini-map vidjetini o'z ichiga oluvchi tab konteyneri"""
 
-    def __init__(self, editor: ScodeScintillaEditor, show_minimap: bool = True):
-        super().__init__()
+    def __init__(self, editor: ScodeScintillaEditor, show_minimap: bool = True, parent=None):
+        super().__init__(parent)
         self.editor = editor
         self.minimap = QsciScintilla()
+        self.minimap_overlay = None
         self._build_ui(show_minimap)
 
     def _build_ui(self, show_minimap: bool):
@@ -104,16 +166,45 @@ class EditorTabContainer(QWidget):
         layout.addWidget(self.editor, 1)
 
         # Mini-map sozlamalari
-        self.minimap.setFixedWidth(110)
+        self.minimap.setFixedWidth(86)
         self.minimap.setMarginWidth(0, 0)
         self.minimap.setMarginWidth(1, 0)
         self.minimap.setMarginWidth(2, 0)
         self.minimap.setReadOnly(True)
-        self.minimap.setPaper(QColor("#181818"))
-        self.minimap.setColor(QColor("#777777"))
+        self.minimap.setPaper(QColor("#1e1e1e"))
+        self.minimap.setColor(QColor("#a1a1aa"))
         self.minimap.setFont(QFont("Consolas", 3))
         self.minimap.setCaretLineVisible(False)
         self.minimap.setWrapMode(QsciScintilla.WrapMode.WrapNone)
+        self.minimap.setExtraAscent(1)
+        self.minimap.setExtraDescent(1)
+        self.minimap.verticalScrollBar().setStyleSheet(
+            """
+            QScrollBar:vertical {
+                background: transparent;
+                width: 5px;
+                margin: 0px;
+                border: none;
+            }
+            QScrollBar::handle:vertical {
+                background: rgba(255, 255, 255, 0.18);
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                border-radius: 3px;
+                min-height: 40px;
+            }
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical,
+            QScrollBar::add-page:vertical,
+            QScrollBar::sub-page:vertical {
+                background: transparent;
+                border: none;
+                height: 0px;
+            }
+            """
+        )
+        self.minimap.setStyleSheet(
+            "QWidget { background: #1e1e1e; border: 1px solid rgba(255, 255, 255, 0.08); }"
+        )
 
         # Sinxronizatsiya: Matn va Scrollbar
         self.minimap.setText(self.editor.text())
@@ -122,15 +213,30 @@ class EditorTabContainer(QWidget):
         self.minimap.verticalScrollBar().valueChanged.connect(self.editor.verticalScrollBar().setValue)
 
         self.minimap.setVisible(show_minimap)
+        self.minimap_overlay = MinimapViewportOverlay(self.minimap)
+        self.minimap_overlay.setGeometry(0, 0, self.minimap.width(), self.minimap.height())
+        self.minimap_overlay.setVisible(show_minimap)
+        self.minimap.verticalScrollBar().valueChanged.connect(self.minimap_overlay.update)
+        self.minimap.textChanged.connect(self.minimap_overlay.update)
         layout.addWidget(self.minimap)
 
     def set_minimap_visible(self, visible: bool):
         self.minimap.setVisible(visible)
+        if self.minimap_overlay is not None:
+            self.minimap_overlay.setVisible(visible)
+            self.minimap_overlay.update()
 
 
-class EditorView(QWidget):
+class EditorView(
+    PersistenceMixin,
+    SplitViewMixin,
+    FloatingOverlaysMixin,
+    EditorCommandsMixin,
+    SmartKeyBindingAndPaletteMixin,
+    QWidget
+):
     """
-    QScintilla asosidagi kod redaktori, endi ko'p faylli tab rejimi bilan.
+    QScintilla asosidagi kod redaktori (VS Code modular mixinlari bilan).
     """
 
     def __init__(self, parent=None, on_back=None):
@@ -176,7 +282,7 @@ class EditorView(QWidget):
         self.git_button.setIconSize(QSize(14, 14))
         self.git_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.git_button.setToolTip("Git Boshqaruv Panelini ochish (Ctrl + Shift + G)")
-        self.git_button.clicked.connect(self.open_git_dialog)
+        self.git_button.clicked.connect(self.cmd_open_git)
         top_bar.addWidget(self.git_button)
 
         # Tashqi terminal tugmasi
@@ -185,8 +291,17 @@ class EditorView(QWidget):
         self.ext_terminal_button.setIconSize(QSize(14, 14))
         self.ext_terminal_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.ext_terminal_button.setToolTip("Loyiha papkasini operatsion tizimning alohida terminalida ochish")
-        self.ext_terminal_button.clicked.connect(self.open_external_terminal)
+        self.ext_terminal_button.clicked.connect(self.cmd_open_external_terminal)
         top_bar.addWidget(self.ext_terminal_button)
+
+        # Matn Qidirish tugmasi (Ctrl + F)
+        self.find_button = QPushButton(" Qidirish")
+        self.find_button.setIcon(IconManager.get_icon("search"))
+        self.find_button.setIconSize(QSize(14, 14))
+        self.find_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.find_button.setToolTip("Matn Qidirish Panelini ochish (Ctrl + F)")
+        self.find_button.clicked.connect(self.cmd_find_in_file)
+        top_bar.addWidget(self.find_button)
 
         # Sozlamalar Tugmasi (Ctrl + ,)
         self.settings_button = QPushButton(" Sozlamalar")
@@ -194,7 +309,7 @@ class EditorView(QWidget):
         self.settings_button.setIconSize(QSize(14, 14))
         self.settings_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.settings_button.setToolTip("Sozlamalar (Ctrl + ,)")
-        self.settings_button.clicked.connect(self.open_settings_dialog)
+        self.settings_button.clicked.connect(self.cmd_open_settings)
         top_bar.addWidget(self.settings_button)
 
         main_layout.addWidget(top_bar_widget)
@@ -208,30 +323,65 @@ class EditorView(QWidget):
         self.search_panel.closed.connect(self._on_search_closed)
         main_layout.addWidget(self.search_panel)
 
+        # Breadcrumbs bar (24px height navigation bar)
+        self.breadcrumbs_bar = BreadcrumbsBar(self)
+        self.breadcrumbs_bar.file_selected.connect(self.open_file)
+        main_layout.addWidget(self.breadcrumbs_bar)
+
+        # Auto-Save & AppData Backup Manager
+        self.backup_manager = AutoSaveBackupManager(interval_seconds=30, parent=self)
+
         self.top_hsplitter = QSplitter(Qt.Orientation.Horizontal)
         self.top_hsplitter.setHandleWidth(2)
 
+        self.file_explorer = CustomFileExplorer()
+        self.file_explorer.file_clicked.connect(self.open_file)
+
+        self.model = ScodeFileSystemModel()
+        self.icon_provider = ScodeTreeIconProvider(self.model)
+        self.model.setIconProvider(self.icon_provider)
+
         self.file_tree = QTreeView()
+        self.file_tree.setModel(self.model)
         self.file_tree.setAnimated(True)
         self.file_tree.setIndentation(12)
         self.file_tree.setHeaderHidden(True)
         self.file_tree.setUniformRowHeights(True)
+        self.file_tree.clicked.connect(self._handle_tree_click)
         self.file_tree.doubleClicked.connect(self._handle_tree_double_click)
+        self.file_tree.expanded.connect(self._on_tree_item_expanded)
+        self.file_tree.collapsed.connect(self._on_tree_item_collapsed)
         self.file_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.file_tree.customContextMenuRequested.connect(self._show_tree_context_menu)
-        self.top_hsplitter.addWidget(self.file_tree)
 
-        self.tab_widget = QTabWidget()
-        self.tab_widget.setTabsClosable(True)
-        self.tab_widget.setMovable(True)
+        self.top_hsplitter.addWidget(self.file_explorer)
+
+        # Inner Editor Splitter for side-by-side split view (Ctrl + \)
+        self.editor_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.editor_splitter.setHandleWidth(2)
+        self.editor_splitter.setChildrenCollapsible(False)
+        self.editor_splitter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+        self.tab_widget = EditorTabWidget(is_secondary=False, parent=self)
+        self.tab_widget.setMinimumWidth(150)
+        self.tab_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.tab_widget.tabCloseRequested.connect(self._close_tab)
-        self.tab_widget.currentChanged.connect(self._on_tab_changed)
-        self.top_hsplitter.addWidget(self.tab_widget)
+        self.tab_widget.currentChanged.connect(self._on_left_tab_changed)
+        self.tab_widget.split_requested.connect(self._handle_split_mode)
+        self.tab_widget.split_tab_requested.connect(self._handle_split_tab)
+        self.tab_widget.close_split_requested.connect(self._handle_close_split)
 
-        self.top_hsplitter.setSizes([220, 780])
+        self.active_tab_widget = self.tab_widget
+
+        self.editor_splitter.addWidget(self.tab_widget)
+        self.editor_splitter.setStretchFactor(0, 1)
+        self.top_hsplitter.addWidget(self.editor_splitter)
+        self.top_hsplitter.setStretchFactor(0, 0)
+        self.top_hsplitter.setStretchFactor(1, 1)
+        self.top_hsplitter.setSizes([240, 1000])
         main_layout.addWidget(self.top_hsplitter, 1)
 
-        # Status Bar
+        # Status Bar (Modern VS Code style dynamic status bar)
         status_bar_widget = QWidget()
         status_bar_widget.setStyleSheet("""
             QWidget {
@@ -241,40 +391,65 @@ class EditorView(QWidget):
             QLabel {
                 color: #ffffff;
                 font-size: 11px;
+                font-family: 'Segoe UI', Arial, sans-serif;
+                padding: 0 4px;
             }
         """)
         status_layout = QHBoxLayout(status_bar_widget)
         status_layout.setContentsMargins(10, 2, 10, 2)
+        status_layout.setSpacing(12)
+
         self.status_label = QLabel("Tayyor")
-        status_layout.addWidget(self.status_label)
+        status_layout.addWidget(self.status_label, 1)
+
+        self.selection_label = QLabel("")
+        self.cursor_pos_label = QLabel("Ln 1, Col 1")
+        self.doc_stats_label = QLabel("Lines: 0, Words: 0, Chars: 0")
+        self.indent_label = QLabel("Spaces: 4")
+        self.encoding_label = QLabel("UTF-8")
+
+        status_layout.addWidget(self.selection_label)
+        status_layout.addWidget(self.cursor_pos_label)
+        status_layout.addWidget(self.doc_stats_label)
+        status_layout.addWidget(self.indent_label)
+        status_layout.addWidget(self.encoding_label)
+
         main_layout.addWidget(status_bar_widget)
 
-        shortcut = QShortcut(QKeySequence("Ctrl+S"), self)
-        shortcut.activated.connect(self.save_current_file)
+        self.save_shortcut = QShortcut(QKeySequence("Ctrl+S"), self)
+        self.save_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        self.save_shortcut.activated.connect(self.cmd_save_file)
 
         # ▶ Run Shortcuts (Ctrl + F5 va F5)
         self.run_shortcut = QShortcut(QKeySequence("Ctrl+F5"), self)
-        self.run_shortcut.activated.connect(self.run_active_file)
+        self.run_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.run_shortcut.activated.connect(self.cmd_run_active_file)
         self.f5_shortcut = QShortcut(QKeySequence("F5"), self)
-        self.f5_shortcut.activated.connect(self.run_active_file)
+        self.f5_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.f5_shortcut.activated.connect(self.cmd_run_active_file)
 
         # Ctrl + P Quick Open
         self.quick_open_shortcut = QShortcut(QKeySequence("Ctrl+P"), self)
-        self.quick_open_shortcut.activated.connect(self.open_quick_open_dialog)
+        self.quick_open_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.quick_open_shortcut.activated.connect(self.cmd_quick_open)
 
         # Ctrl + , Settings
         self.settings_shortcut = QShortcut(QKeySequence("Ctrl+,"), self)
+        self.settings_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
         self.settings_shortcut.activated.connect(self.open_settings_dialog)
 
         # Find / Replace shortcuts
         self.find_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
-        self.find_shortcut.activated.connect(self._on_find_shortcut)
+        self.find_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.find_shortcut.activated.connect(self.cmd_find_in_file)
 
         self.replace_shortcut = QShortcut(QKeySequence("Ctrl+H"), self)
-        self.replace_shortcut.activated.connect(self._on_replace_shortcut)
+        self.replace_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.replace_shortcut.activated.connect(self.cmd_replace_in_file)
 
         # Git Panel Shortcut (Ctrl + Shift + G)
         self.git_shortcut = QShortcut(QKeySequence("Ctrl+Shift+G"), self)
+        self.git_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
         self.git_shortcut.activated.connect(self.open_git_dialog)
 
         self.model = QFileSystemModel()
@@ -292,38 +467,162 @@ class EditorView(QWidget):
         self.auto_save_timer.timeout.connect(self._handle_auto_save)
         # Ensure Esc hides search panel when visible
         self.escape_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        self.escape_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.escape_shortcut.activated.connect(self._on_escape_pressed)
 
     def _connect_editor_signals(self, editor: ScodeScintillaEditor) -> None:
         try:
             editor.textChanged.connect(self._on_editor_text_changed)
+            editor.cursorPositionChanged.connect(self._on_cursor_position_changed)
+            editor.selectionChanged.connect(self._on_selection_changed)
         except Exception:
             pass
 
     def _disconnect_editor_signals(self, editor: ScodeScintillaEditor) -> None:
         try:
             editor.textChanged.disconnect(self._on_editor_text_changed)
+            editor.cursorPositionChanged.disconnect(self._on_cursor_position_changed)
+            editor.selectionChanged.disconnect(self._on_selection_changed)
         except Exception:
             pass
 
+    def _on_cursor_position_changed(self, line: int, col: int) -> None:
+        self._update_status_bar_metrics(line=line, col=col)
+
+    def _on_selection_changed(self) -> None:
+        self._update_status_bar_metrics()
+
+    def _update_status_bar_metrics(self, line: int = -1, col: int = -1) -> None:
+        editor, _ = self.get_current_editor()
+        if not editor or not hasattr(editor, "getCursorPosition"):
+            return
+
+        if line < 0 or col < 0:
+            line, col = editor.getCursorPosition()
+
+        if hasattr(self, 'cursor_pos_label') and self.cursor_pos_label:
+            self.cursor_pos_label.setText(f"Ln {line + 1}, Col {col + 1}")
+
+        if hasattr(self, 'selection_label') and self.selection_label:
+            sel_text = editor.selectedText() if hasattr(editor, 'selectedText') else ""
+            if sel_text:
+                self.selection_label.setText(f"({len(sel_text)} characters selected)")
+            else:
+                self.selection_label.setText("")
+
+        if hasattr(self, 'doc_stats_label') and self.doc_stats_label:
+            text = editor.text() if hasattr(editor, 'text') else ""
+            lines_cnt = editor.lines() if hasattr(editor, 'lines') else 0
+            words_cnt = len(re.findall(r'\b\w+\b', text)) if text else 0
+            chars_cnt = len(text)
+            self.doc_stats_label.setText(f"Lines: {lines_cnt}, Words: {words_cnt}, Chars: {chars_cnt}")
+
+        if hasattr(self, 'indent_label') and self.indent_label:
+            tab_width = editor.tabWidth() if hasattr(editor, 'tabWidth') else 4
+            self.indent_label.setText(f"Spaces: {tab_width}")
+
+        if hasattr(self, 'encoding_label') and self.encoding_label:
+            self.encoding_label.setText("UTF-8")
+
     def _on_editor_text_changed(self) -> None:
-        editor, file_path = self.get_current_editor()
-        if editor and not self.is_loading_file and file_path:
-            self.status_label.setText(f"{file_path} — (Tahrirlanmoqda...)")
-            self.auto_save_timer.start()
+        if getattr(self, 'is_loading_file', False):
+            return
+        sender = self.sender()
+        if not sender or not hasattr(sender, 'file_path'):
+            sender, _ = self.get_current_editor()
+        if sender:
+            sender._dirty = True
+            if hasattr(sender, "setModified"):
+                sender.setModified(True)
+            self._update_tab_title(sender)
+            self._update_status_bar_metrics()
+
+            # Debounce: har gal o'zgarganda taymerni stop qilib, 1500ms ga noldan boshlaymiz
+            if hasattr(self, 'auto_save_timer') and self.auto_save_timer:
+                self.auto_save_timer.stop()
+                self.auto_save_timer.start(1500)
+
+            if hasattr(sender, '_schedule_lint'):
+                sender._schedule_lint()
+
+    def cmd_save_file(self) -> None:
+        """Manual Save triggered by Ctrl+S or Save action"""
+        editor, _ = self.get_current_editor()
+        self.save_file(editor=editor, is_auto_save=False)
+
+    def save_file(self, editor=None, is_auto_save: bool = False) -> bool:
+        """Save a specific editor or active editor to disk.
+        If file_path is missing/Untitled and is_auto_save=False, prompt user with Save File dialog."""
+        if editor is None:
+            editor, _ = self.get_current_editor()
+        if not editor or not hasattr(editor, "text"):
+            return False
+
+        file_path = getattr(editor, "file_path", None)
+
+        # If file has no valid path or directory doesn't exist
+        if not file_path or not os.path.isabs(file_path) or not os.path.exists(os.path.dirname(file_path)):
+            if is_auto_save:
+                return False
+            start_dir = self.project_path or os.path.expanduser("~")
+            chosen_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Faylni Saqlash (Save File)",
+                start_dir,
+                "Barcha Fayllar (*.*);;Python Fayllari (*.py);;JavaScript (*.js);;HTML (*.html)"
+            )
+            if chosen_path:
+                file_path = os.path.normpath(chosen_path)
+                editor.file_path = file_path
+                apply_lexer_for_file(editor, file_path)
+            else:
+                return False
+
+        try:
+            with open(file_path, "w", encoding="utf-8") as handle:
+                handle.write(editor.text())
+            editor._dirty = False
+            if hasattr(editor, "setModified"):
+                editor.setModified(False)
             self._update_tab_title(editor)
+            self.current_file_path = file_path
+            self.path_label.setText(file_path)
+            if not is_auto_save:
+                self.status_label.setText(f"Fayl saqlandi: {os.path.basename(file_path)}")
+            if hasattr(self, "file_explorer") and self.file_explorer and self.project_path:
+                self.file_explorer.set_root_path(self.project_path)
+            return True
+        except Exception as exc:
+            if not is_auto_save:
+                QMessageBox.critical(self, "Saqlashda Xatolik", f"Faylni saqlashda xatolik yuz berdi:\n{exc}")
+            else:
+                print(f"Auto-save xatolik ({file_path}): {exc}")
+            return False
 
     def _handle_auto_save(self) -> None:
-        editor, file_path = self.get_current_editor()
-        if editor and file_path and os.path.exists(file_path):
-            try:
-                with open(file_path, "w", encoding="utf-8") as handle:
-                    handle.write(editor.text())
-                editor.setModified(False)
-                self.status_label.setText(f"{file_path} — (Auto-saved)")
-                self._update_tab_title(editor)
-            except Exception as exc:
-                self.status_label.setText(f"Auto-save xatolik: {exc}")
+        if getattr(self, 'is_loading_file', False):
+            return
+        editors_to_save = []
+        for tw in (getattr(self, 'tab_widget', None), getattr(self, 'right_tab_widget', None)):
+            if not tw:
+                continue
+            for idx in range(tw.count()):
+                w = tw.widget(idx)
+                ed = self._extract_editor(w)
+                if ed:
+                    is_mod = getattr(ed, '_dirty', False) or (hasattr(ed, "isModified") and ed.isModified())
+                    if is_mod:
+                        fp = getattr(ed, "file_path", None)
+                        if fp and os.path.isabs(fp) and os.path.exists(os.path.dirname(fp)):
+                            editors_to_save.append(ed)
+
+        saved_count = 0
+        for ed in editors_to_save:
+            if self.save_file(editor=ed, is_auto_save=True):
+                saved_count += 1
+
+        if saved_count > 0:
+            self.status_label.setText(f"Avtomatik saqlandi ({saved_count} ta fayl)")
 
     # ----------------- Search/Replace Handlers -----------------
     def _on_find_shortcut(self):
@@ -389,14 +688,14 @@ class EditorView(QWidget):
             # If current selection matches, replace it, else find next then replace
             sel = editor.selectedText()
             if sel and sel == find_text:
-                editor.replaceSelected(replace_text)
+                editor.replaceSelectedText(replace_text)
                 editor.setModified(True)
                 self._update_tab_title(editor)
             else:
                 self._find_next(find_text)
                 sel2 = editor.selectedText()
                 if sel2 and sel2 == find_text:
-                    editor.replaceSelected(replace_text)
+                    editor.replaceSelectedText(replace_text)
                     editor.setModified(True)
                     self._update_tab_title(editor)
         except Exception:
@@ -412,7 +711,7 @@ class EditorView(QWidget):
             editor.setCursorPosition(0, 0)
             count = 0
             while editor.findFirst(find_text, False, True, True, False, False):
-                editor.replaceSelected(replace_text)
+                editor.replaceSelectedText(replace_text)
                 count += 1
             editor.endUndoAction()
             editor.setModified(True)
@@ -572,20 +871,89 @@ class EditorView(QWidget):
                 QMessageBox.critical(self, "Xatolik", f"O'chirishda xatolik: {e}")
 
     def set_project_path(self, project_path: str, auto_install: bool = False) -> None:
+        if not project_path:
+            return
+
+        from app.utils.config import ConfigManager
+        from app.utils.cache_manager import get_cache_dir, CacheBackupWorker
+        import shutil
+
+        is_missing = not os.path.exists(project_path)
+        is_empty = os.path.exists(project_path) and os.path.isdir(project_path) and len(os.listdir(project_path)) == 0
+
+        # Agar original papka diskda topilmasa yoki bo'sh (0 ta fayl) bo'lsa -> Keshdan avtomatik tiklash
+        if is_missing or is_empty:
+            cfg = getattr(self.parent_window, 'config', None) or ConfigManager()
+            project_id = cfg._get_project_id(project_path)
+            cache_dir = os.path.join(get_cache_dir(), project_id)
+
+            if os.path.exists(cache_dir) and os.listdir(cache_dir):
+                try:
+                    os.makedirs(project_path, exist_ok=True)
+                    for item in os.listdir(cache_dir):
+                        s = os.path.join(cache_dir, item)
+                        d = os.path.join(project_path, item)
+                        if os.path.isdir(s):
+                            shutil.copytree(s, d, dirs_exist_ok=True)
+                        else:
+                            shutil.copy2(s, d)
+                    if is_empty:
+                        self.status_label.setText(f"⚠️ Papka bo'sh edi. AppData keshidan barcha fayllar avtomatik tiklandi: {project_path}")
+                    else:
+                        self.status_label.setText(f"Loyiha keshdan avtomatik tiklandi: {project_path}")
+                except Exception:
+                    project_path = cache_dir
+                    self.status_label.setText("Loyiha AppData keshidan ochildi")
+            else:
+                self.status_label.setText("Loyiha papkasi topilmadi")
+                if is_missing:
+                    return
+        else:
+            # Original papka diskda bor va fayllar mavjud bo'lsa => Background QThread da keshni yangilash
+            self.backup_worker = CacheBackupWorker(project_path)
+            self.backup_worker.start()
+
         self.project_path = project_path
         self.current_file_path = None
         self.path_label.setText(project_path or "Loyiha tanlanmagan")
-        self.status_label.setText("Loyiha ochildi. Fayl tanlang")
 
-        if not project_path or not os.path.exists(project_path):
-            return
+        if hasattr(self, "file_explorer") and self.file_explorer:
+            self.file_explorer.set_root_path(project_path)
 
         self.model.setRootPath(project_path)
         root_index = self.model.index(project_path)
         self.file_tree.setRootIndex(root_index)
+        self.file_tree.viewport().update()
 
         if hasattr(self, "terminal_panel") and self.terminal_panel:
             self.terminal_panel.set_project_path(project_path)
+
+        # AppData/Local/ScodeEditor dan saqlangan tablarni tiklash
+        if hasattr(self, "restore_session_state"):
+            self.restore_session_state()
+
+    def _on_tree_item_expanded(self, index: QModelIndex) -> None:
+        """Papka yoyilganda ikonkalarni dinamik yangilash (folder-open.svg / folder-src-open.svg)"""
+        if hasattr(self, 'icon_provider') and self.icon_provider:
+            self.icon_provider.set_expanded(index, True)
+        if hasattr(self, 'model') and hasattr(self.model, 'on_expanded'):
+            self.model.on_expanded(index)
+
+    def _on_tree_item_collapsed(self, index: QModelIndex) -> None:
+        """Papka yopilganda ikonkalarni dinamik yangilash (folder.svg / folder-src.svg)"""
+        if hasattr(self, 'icon_provider') and self.icon_provider:
+            self.icon_provider.set_expanded(index, False)
+        if hasattr(self, 'model') and hasattr(self.model, 'on_collapsed'):
+            self.model.on_collapsed(index)
+
+    def refresh_tree_icons(self) -> None:
+        """Keshni tozalab, File Explorer ikonkalari ko'rinishini majburiy yangilaydi"""
+        if hasattr(self, 'icon_provider') and self.icon_provider:
+            self.icon_provider.clear_cache()
+        if hasattr(self, 'model') and self.project_path:
+            self.model.layoutChanged.emit()
+        if hasattr(self, 'file_tree') and self.file_tree:
+            self.file_tree.viewport().update()
 
         if auto_install:
             self._start_installation()
@@ -610,38 +978,150 @@ class EditorView(QWidget):
         if self.auto_save_timer.isActive():
             self.auto_save_timer.stop()
             self._handle_auto_save()
+        if hasattr(self, "save_session_state"):
+            self.save_session_state()
         if self.on_back:
             self.on_back()
 
-    def _handle_tree_double_click(self, index) -> None:
+    def _handle_tree_click(self, index) -> None:
         file_path = self.model.filePath(index)
-        if not file_path or not os.path.isfile(file_path):
+        if not file_path:
             return
 
-        self.open_file(file_path)
+        if os.path.isdir(file_path):
+            if self.file_tree.isExpanded(index):
+                self.file_tree.collapse(index)
+            else:
+                self.file_tree.expand(index)
+            return
+
+        if not os.path.isfile(file_path):
+            return
+
+        modifiers = QApplication.keyboardModifiers()
+        if modifiers & Qt.KeyboardModifier.ControlModifier:
+            self.cmd_open_file_in_split(file_path)
+        else:
+            self.open_file(file_path)
+
+    def _handle_tree_double_click(self, index) -> None:
+        file_path = self.model.filePath(index)
+        if not file_path or os.path.isdir(file_path):
+            return
+
+        if not os.path.isfile(file_path):
+            return
+
+        modifiers = QApplication.keyboardModifiers()
+        if modifiers & Qt.KeyboardModifier.ControlModifier:
+            self.cmd_open_file_in_split(file_path)
+        else:
+            self.open_file(file_path)
 
     def _extract_editor(self, widget: QWidget):
+        from app.ui.image_editor import ImageEditorWidget
         if isinstance(widget, EditorTabContainer):
             return widget.editor
-        elif isinstance(widget, ScodeScintillaEditor):
+        elif isinstance(widget, (ScodeScintillaEditor, ScodeTextEdit, ImageEditorWidget)):
+            return widget
+        elif hasattr(widget, 'file_path'):
             return widget
         return None
 
-    def open_file(self, file_path: str) -> None:
+    def open_file(self, file_path: str, in_split: bool = False) -> None:
         if not file_path or not os.path.exists(file_path):
             return
 
         normalized_path = os.path.normpath(file_path)
-        for idx in range(self.tab_widget.count()):
-            w = self.tab_widget.widget(idx)
-            ed = self._extract_editor(w)
-            if ed and os.path.normcase(os.path.normpath(getattr(ed, "file_path", ""))) == os.path.normcase(normalized_path):
-                self.tab_widget.setCurrentIndex(idx)
-                return
+
+        # 1. Agar in_split bo'lmasa, fayl allaqachon ochilganini tekshirish
+        if not in_split:
+            panes_to_check = []
+            if hasattr(self, 'active_tab_widget') and self.active_tab_widget:
+                panes_to_check.append(self.active_tab_widget)
+            if hasattr(self, 'tab_widget') and self.tab_widget not in panes_to_check:
+                panes_to_check.append(self.tab_widget)
+            if hasattr(self, 'right_tab_widget') and self.right_tab_widget and self.right_tab_widget not in panes_to_check:
+                panes_to_check.append(self.right_tab_widget)
+
+            for tw in panes_to_check:
+                if tw and tw.isVisible():
+                    for idx in range(tw.count()):
+                        w = tw.widget(idx)
+                        ed = self._extract_editor(w)
+                        if ed and os.path.normcase(os.path.normpath(getattr(ed, "file_path", ""))) == os.path.normcase(normalized_path):
+                            tw.setCurrentIndex(idx)
+                            self.active_tab_widget = tw
+                            self.active_editor = ed
+                            tw.show()
+                            tw.setVisible(True)
+                            tw.raise_()
+                            try:
+                                ed.setFocus()
+                            except Exception:
+                                pass
+                            return
+        else:
+            # in_split=True holatida faqat right_tab_widget ichini tekshiramiz
+            if hasattr(self, 'right_tab_widget') and self.right_tab_widget and self.right_tab_widget.isVisible():
+                for idx in range(self.right_tab_widget.count()):
+                    w = self.right_tab_widget.widget(idx)
+                    ed = self._extract_editor(w)
+                    if ed and os.path.normcase(os.path.normpath(getattr(ed, "file_path", ""))) == os.path.normcase(normalized_path):
+                        self.right_tab_widget.setCurrentIndex(idx)
+                        self.active_tab_widget = self.right_tab_widget
+                        self.active_editor = ed
+                        try:
+                            ed.setFocus()
+                        except Exception:
+                            pass
+                        return
+
+        # 2. Yangi faylni ochish uchun faol pane'ni (kursor bor tomondagi oynani) aniqlash
+        if in_split:
+            self._ensure_split_widget()
+            target_tabs = self.right_tab_widget
+            self.active_tab_widget = self.right_tab_widget
+        else:
+            target_tabs = getattr(self, 'active_tab_widget', None) or self.tab_widget
+            if hasattr(self, 'right_tab_widget') and target_tabs == self.right_tab_widget and not self.right_tab_widget.isVisible():
+                target_tabs = self.tab_widget
+
+        if target_tabs:
+            target_tabs.show()
+            target_tabs.setVisible(True)
+            target_tabs.raise_()
+
+        if in_split and hasattr(self, 'editor_splitter') and self.editor_splitter:
+            sizes = self.editor_splitter.sizes()
+            if len(sizes) >= 2 and (sizes[1] == 0 or sizes[0] == 0):
+                total = sum(sizes) if sum(sizes) > 0 else 1000
+                self.editor_splitter.setSizes([total // 2, total // 2])
+            self.editor_splitter.refresh()
+            self.editor_splitter.update()
 
         if self.auto_save_timer.isActive():
             self.auto_save_timer.stop()
             self._handle_auto_save()
+
+        # Check if file is image
+        ext = os.path.splitext(normalized_path)[1].lower()
+        if ext in ('.png', '.jpg', '.jpeg', '.svg', '.ico', '.bmp', '.webp', '.gif'):
+            from app.ui.image_editor import ImageEditorWidget
+            image_widget = ImageEditorWidget(file_path=normalized_path, parent=target_tabs)
+            tab_index = target_tabs.addTab(image_widget, os.path.basename(normalized_path))
+            target_tabs.setTabToolTip(tab_index, normalized_path)
+            target_tabs.setCurrentIndex(tab_index)
+
+            self.active_tab_widget = target_tabs
+            self.active_editor = image_widget
+            self.current_file_path = normalized_path
+            self.path_label.setText(normalized_path)
+            self.status_label.setText(f"Rasm ko'rish oynasida ochildi ({ext})")
+
+            if hasattr(self, "save_session_state"):
+                self.save_session_state()
+            return
 
         try:
             with open(file_path, "r", encoding="utf-8") as handle:
@@ -650,11 +1130,10 @@ class EditorView(QWidget):
             QMessageBox.critical(self, "Xatolik", f"Fayl o'qishda xatolik: {exc}")
             return
 
-        # Config sozlamalarini yuklash
         cfg = self.parent_window.config if self.parent_window and hasattr(self.parent_window, "config") else ConfigManager()
         settings = cfg.get_settings()
 
-        editor = ScodeScintillaEditor()
+        editor = ScodeScintillaEditor(parent=target_tabs)
         editor.file_path = normalized_path
         apply_lexer_for_file(editor, normalized_path)
         editor.apply_settings(
@@ -663,32 +1142,88 @@ class EditorView(QWidget):
             tab_size=settings.get("tab_size", 4),
         )
         self._connect_editor_signals(editor)
-        editor.setText(content)
+        self.is_loading_file = True
+        try:
+            editor.setText(content)
+        finally:
+            self.is_loading_file = False
+        if hasattr(editor, '_schedule_lint'):
+            editor._schedule_lint()
         editor.setModified(False)
 
-        container = EditorTabContainer(editor, show_minimap=settings.get("show_minimap", True))
-        tab_index = self.tab_widget.addTab(container, os.path.basename(normalized_path))
-        self.tab_widget.setTabToolTip(tab_index, normalized_path)
-        self.tab_widget.setCurrentIndex(tab_index)
+        container = EditorTabContainer(editor, show_minimap=settings.get("show_minimap", True), parent=target_tabs)
+        tab_index = target_tabs.addTab(container, os.path.basename(normalized_path))
+        target_tabs.setTabToolTip(tab_index, normalized_path)
+        target_tabs.setCurrentIndex(tab_index)
 
+        self.active_tab_widget = target_tabs
+        self.active_editor = editor
         self.current_file_path = normalized_path
         self.path_label.setText(normalized_path)
         self.status_label.setText(f"Fayl ochildi ({os.path.splitext(normalized_path)[1]})")
 
+        if hasattr(self, "breadcrumbs_bar") and self.breadcrumbs_bar:
+            self.breadcrumbs_bar.set_file_path(normalized_path, self.project_path)
+        if hasattr(self, "backup_manager") and self.backup_manager:
+            self.backup_manager.track_file(normalized_path, editor)
+
+        try:
+            editor.setFocus()
+            editor.activateWindow()
+        except Exception:
+            pass
+
+        if hasattr(self, "save_session_state"):
+            self.save_session_state()
+
     def get_current_editor(self):
-        widget = self.tab_widget.currentWidget()
+        target_tabs = getattr(self, 'active_tab_widget', None) or self.tab_widget
+        if not target_tabs or target_tabs.count() == 0:
+            target_tabs = self.tab_widget
+        widget = target_tabs.currentWidget() if target_tabs else None
         editor = self._extract_editor(widget)
         if editor:
             return editor, getattr(editor, "file_path", None)
+        if target_tabs != self.tab_widget and self.tab_widget and self.tab_widget.count() > 0:
+            widget = self.tab_widget.currentWidget()
+            editor = self._extract_editor(widget)
+            if editor:
+                return editor, getattr(editor, "file_path", None)
         return None, None
 
-    def _on_tab_changed(self, index: int) -> None:
-        widget = self.tab_widget.widget(index)
-        editor = self._extract_editor(widget)
+    def _on_left_tab_changed(self, index: int) -> None:
+        self.active_tab_widget = self.tab_widget
+        self._on_tab_changed(index)
 
-        previous_editor = self.active_editor
-        if previous_editor is not None and previous_editor != editor:
-            self._disconnect_editor_signals(previous_editor)
+    def _on_right_tab_changed(self, index: int) -> None:
+        if hasattr(self, 'right_tab_widget') and self.right_tab_widget:
+            self.active_tab_widget = self.right_tab_widget
+            widget = self.right_tab_widget.widget(index)
+            editor = self._extract_editor(widget)
+            if editor and isinstance(editor, ScodeScintillaEditor):
+                self.active_editor = editor
+                self.current_file_path = getattr(editor, "file_path", None)
+                if self.current_file_path:
+                    apply_lexer_for_file(editor, self.current_file_path)
+                self.path_label.setText(self.current_file_path or self.project_path or "Loyiha tanlanmagan")
+                self.status_label.setText(
+                    f"{os.path.basename(self.current_file_path)} — Split Tab faollashtirildi"
+                    if self.current_file_path
+                    else "Yangi yozuv tab'ini oching"
+                )
+                try:
+                    editor.setFocus()
+                    editor.activateWindow()
+                except Exception:
+                    pass
+
+    def _on_tab_changed(self, index: int) -> None:
+        # Tab o'zgarganda avtomatik saqlashni bajarish
+        self._handle_auto_save()
+
+        target_tabs = getattr(self, 'active_tab_widget', None) or self.tab_widget
+        widget = target_tabs.widget(index) if target_tabs else None
+        editor = self._extract_editor(widget)
 
         if editor and isinstance(editor, ScodeScintillaEditor):
             self.active_editor = editor
@@ -696,6 +1231,8 @@ class EditorView(QWidget):
             if self.current_file_path:
                 apply_lexer_for_file(editor, self.current_file_path)
             self.path_label.setText(self.current_file_path or self.project_path or "Loyiha tanlanmagan")
+            if hasattr(self, "breadcrumbs_bar") and self.breadcrumbs_bar:
+                self.breadcrumbs_bar.set_file_path(self.current_file_path or "", self.project_path or "")
             self.status_label.setText(
                 f"{os.path.basename(self.current_file_path)} — Tab faollashtirildi"
                 if self.current_file_path
@@ -703,16 +1240,25 @@ class EditorView(QWidget):
             )
             self._connect_editor_signals(editor)
             self._update_tab_title(editor)
+            self._update_status_bar_metrics()
+            try:
+                editor.setFocus()
+                editor.activateWindow()
+            except Exception:
+                pass
         else:
             self.active_editor = None
             self.current_file_path = None
             self.path_label.setText(self.project_path or "Loyiha tanlanmagan")
 
     def _close_tab(self, index: int) -> None:
-        widget = self.tab_widget.widget(index)
+        self._close_tab_in_widget(self.tab_widget, index)
+
+    def _close_tab_in_widget(self, target_tabs: QTabWidget, index: int) -> None:
+        widget = target_tabs.widget(index)
         editor = self._extract_editor(widget)
         if not editor or not isinstance(editor, ScodeScintillaEditor):
-            self.tab_widget.removeTab(index)
+            target_tabs.removeTab(index)
             return
 
         file_path = getattr(editor, "file_path", None)
@@ -720,7 +1266,7 @@ class EditorView(QWidget):
             reply = QMessageBox.question(
                 self,
                 "Saqlansinmi?",
-                f"'{os.path.basename(file_path)}' faylida saqlanmagan o'zgarishlar mavjud. Saqlab yopilsinmi?",
+                f"'{os.path.basename(file_path or 'Fayl')}' faylida saqlanmagan o'zgarishlar mavjud. Saqlab yopilsinmi?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Yes,
             )
@@ -731,12 +1277,19 @@ class EditorView(QWidget):
                     return
 
         self._disconnect_editor_signals(editor)
-        self.tab_widget.removeTab(index)
-        if self.tab_widget.count() == 0:
-            self.path_label.setText(self.project_path or "Loyiha tanlanmagan")
-            self.status_label.setText("Tayyor")
+        target_tabs.removeTab(index)
+        if target_tabs.count() == 0:
+            if target_tabs == self.tab_widget:
+                self.path_label.setText(self.project_path or "Loyiha tanlanmagan")
+                self.status_label.setText("Tayyor")
+            elif hasattr(self, 'right_tab_widget') and target_tabs == self.right_tab_widget:
+                self.right_tab_widget.setVisible(False)
+                self.active_tab_widget = self.tab_widget
         else:
-            self._on_tab_changed(self.tab_widget.currentIndex())
+            self._on_tab_changed(target_tabs.currentIndex())
+
+        if hasattr(self, "save_session_state"):
+            self.save_session_state()
 
     def _save_editor(self, editor: ScodeScintillaEditor) -> bool:
         file_path = getattr(editor, "file_path", None)
@@ -764,6 +1317,57 @@ class EditorView(QWidget):
             return
 
         self._save_editor(editor)
+
+    def cmd_save_file(self) -> None:
+        """Alias for save_current_file"""
+        self.save_current_file()
+
+    def cmd_run_active_file(self) -> None:
+        """Alias for run_active_file"""
+        self.run_active_file()
+
+    def cmd_open_git(self) -> None:
+        """Alias for open_git_dialog"""
+        self.open_git_dialog()
+
+    def cmd_open_settings(self) -> None:
+        """Alias for open_settings_dialog"""
+        self.open_settings_dialog()
+
+    def _connect_editor_signals(self, editor: ScodeScintillaEditor):
+        if not editor or not isinstance(editor, ScodeScintillaEditor):
+            return
+        try:
+            editor.cursorPositionChanged.connect(lambda l, c, ed=editor: self._on_editor_focused(ed))
+            editor.modificationChanged.connect(lambda mod, ed=editor: self._update_tab_title(ed))
+        except Exception:
+            pass
+
+    def _disconnect_editor_signals(self, editor: ScodeScintillaEditor):
+        if not editor or not isinstance(editor, ScodeScintillaEditor):
+            return
+        try:
+            editor.cursorPositionChanged.disconnect()
+            editor.modificationChanged.disconnect()
+        except Exception:
+            pass
+
+    def _on_editor_focused(self, editor: ScodeScintillaEditor):
+        if not editor:
+            return
+        self.active_editor = editor
+        self.current_file_path = getattr(editor, "file_path", None)
+
+        if hasattr(self, 'right_tab_widget') and self.right_tab_widget and self.right_tab_widget.isVisible():
+            for i in range(self.right_tab_widget.count()):
+                if self._extract_editor(self.right_tab_widget.widget(i)) == editor:
+                    self.active_tab_widget = self.right_tab_widget
+                    return
+        if hasattr(self, 'tab_widget') and self.tab_widget:
+            for i in range(self.tab_widget.count()):
+                if self._extract_editor(self.tab_widget.widget(i)) == editor:
+                    self.active_tab_widget = self.tab_widget
+                    return
 
     def _update_tab_title(self, editor: ScodeScintillaEditor) -> None:
         file_path = getattr(editor, "file_path", None)
@@ -882,6 +1486,10 @@ class EditorView(QWidget):
 
         dialog.exec()
 
+    def cmd_open_git(self):
+        """Ctrl + Shift + G shortcut alias"""
+        self.open_git_dialog()
+
     def open_quick_open_dialog(self):
         """Ctrl + P tezkor fayl qidiruv modalini ochish"""
         if not self.project_path:
@@ -902,6 +1510,10 @@ class EditorView(QWidget):
         dialog = SettingsDialog(self, config=cfg)
         dialog.settings_saved.connect(self.apply_global_settings)
         dialog.exec()
+
+    def cmd_open_settings(self):
+        """Ctrl + , shortcut alias"""
+        self.open_settings_dialog()
 
     def apply_global_settings(self, settings: dict = None):
         """Sozlamalarni barcha ochiq tab va vidjetlarga tatbiq etish"""
@@ -924,3 +1536,19 @@ class EditorView(QWidget):
                 container.set_minimap_visible(show_minimap)
             elif isinstance(container, ScodeScintillaEditor):
                 container.apply_settings(font_family, font_size, tab_size)
+
+    def save_all_modified_files(self) -> None:
+        """Dastur yopilayotganda barcha ochiq tablardagi saqlanmagan o'zgarishlarni diskka yozish"""
+        if self.auto_save_timer.isActive():
+            self.auto_save_timer.stop()
+        self._handle_auto_save()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if hasattr(self, 'top_hsplitter') and self.top_hsplitter:
+            self.top_hsplitter.setSizes([240, max(600, self.width() - 240)])
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, '_refresh_split_layout'):
+            self._refresh_split_layout()

@@ -17,7 +17,7 @@ class App(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Scode Editor")
-        self.setGeometry(100, 100, 1000, 650)
+        
         # 1. AppData/Local Config menejerini yuklash
         self.config = ConfigManager()
         current_theme = self.config.get_settings().get("theme", "Dark (One Dark Pro)")
@@ -47,36 +47,62 @@ class App(QMainWindow):
         self.editor_view = EditorView(parent=self, on_back=self.show_projects)
         self.stack.addWidget(self.editor_view)
 
-        # Dastur ochilganda avto-login tekshiruvi
-        self.check_on_startup()
+        # Global Shortcuts on Top-Level Window (ApplicationShortcut context)
+        from PyQt6.QtGui import QKeySequence, QShortcut
+        from PyQt6.QtCore import Qt
 
-    def check_on_startup(self):
-        username = keyring.get_password("scode_editor", "username")
-        password = keyring.get_password("scode_editor", "password")
+        self.shortcut_save = QShortcut(QKeySequence("Ctrl+S"), self)
+        self.shortcut_save.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.shortcut_save.activated.connect(lambda: self.editor_view.cmd_save_file())
 
-        if username and password:
-            try:
-                url = "https://sstudio.uz/api/scode/login-check"
-                res = requests.post(url, json={"username": username, "password": password}, timeout=5)
+        self.shortcut_settings = QShortcut(QKeySequence("Ctrl+,"), self)
+        self.shortcut_settings.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.shortcut_settings.activated.connect(lambda: self.editor_view.open_settings_dialog())
 
-                if res.status_code == 200 and res.json().get("has_active_subscription"):
-                    self.show_projects()
-                    return
-            except Exception:
-                pass  # Server bilan aloqa bo'lmasa login sahifasiga o'tadi
+        self.shortcut_git = QShortcut(QKeySequence("Ctrl+Shift+G"), self)
+        self.shortcut_git.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.shortcut_git.activated.connect(lambda: self.editor_view.open_git_dialog())
 
-        self.show_login()
+        # Dastur ochilganda avto-login tekshiruvi (Server ishlamayotgani sababli vaqtincha izohga olindi)
+        # self.check_on_startup()
+        self.show_projects()
+        self.showMaximized()
+
+    # def check_on_startup(self):
+    #     username = keyring.get_password("scode_editor", "username")
+    #     password = keyring.get_password("scode_editor", "password")
+    #
+    #     if username and password:
+    #         try:
+    #             url = "https://sstudio.uz/api/scode/login-check"
+    #             res = requests.post(url, json={"username": username, "password": password}, timeout=5)
+    #
+    #             if res.status_code == 200 and res.json().get("has_active_subscription"):
+    #                 self.show_projects()
+    #                 return
+    #         except Exception:
+    #             pass  # Server bilan aloqa bo'lmasa login sahifasiga o'tadi
+    #
+    #     self.show_login()
 
     def show_login(self):
         self.stack.setCurrentIndex(0)
 
     def closeEvent(self, event):
-        """Safely terminate all background QThreads before the application exits."""
+        """Safely terminate all background QThreads, auto-save modified files, and save session state before exit."""
+        if hasattr(self, 'editor_view') and self.editor_view:
+            try:
+                if hasattr(self.editor_view, 'save_all_modified_files'):
+                    self.editor_view.save_all_modified_files()
+                if hasattr(self.editor_view, 'save_session_state'):
+                    self.editor_view.save_session_state()
+            except Exception as e:
+                print(f"CloseEvent save error: {e}")
         for thread in self.findChildren(QThread):
             if thread.isRunning():
                 try:
                     thread.quit()
-                    thread.wait(3000)  # wait up to 3 seconds
+                    thread.wait(3000)  # wait up to 3 seconds
                 except Exception:
                     pass
         event.accept()

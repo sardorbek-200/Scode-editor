@@ -133,6 +133,24 @@ class SettingsDialog(QDialog):
         ])
         self.form_layout.addRow("Rangli Mavzu (Theme):", self.theme_combo)
 
+        btn_custom_theme = QPushButton("🎨 Ranglar Mavzusini Moslashtirish (Theme Customizer)...")
+        btn_custom_theme.setStyleSheet("""
+            QPushButton {
+                background-color: #2d2d2d;
+                color: #007acc;
+                border: 1px solid #007acc;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #04395e;
+                color: #ffffff;
+            }
+        """)
+        btn_custom_theme.clicked.connect(self._open_theme_customizer)
+        self.form_layout.addRow("", btn_custom_theme)
+
         # 1. Shrift Turi (Font Family)
         self.font_combo = QComboBox()
         self.font_combo.addItems(["Consolas", "Cascadia Code", "Fira Code", "Courier New", "Arial"])
@@ -236,3 +254,17 @@ class SettingsDialog(QDialog):
 
         self.settings_saved.emit(updated)
         self.accept()
+
+    def _open_theme_customizer(self):
+        from app.ui.theme_settings import ThemeCustomizerDialog
+        dlg = ThemeCustomizerDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            # Apply colors to open editors
+            p = self.parent()
+            while p:
+                if hasattr(p, "findChildren"):
+                    from app.ui.editor_scintilla import ScodeScintillaEditor
+                    for ed in p.findChildren(ScodeScintillaEditor):
+                        ed.apply_custom_theme_colors(dlg.current_theme_colors)
+                    break
+                p = p.parent()

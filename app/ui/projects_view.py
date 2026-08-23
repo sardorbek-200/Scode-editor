@@ -94,7 +94,8 @@ class ProjectsView(QWidget):
 
         for p in recent_projects:
             path = p.get("path")
-            if path and os.path.exists(path):
+            is_valid_non_empty = path and os.path.exists(path) and os.path.isdir(path) and len(os.listdir(path)) > 0
+            if is_valid_non_empty:
                 project_meta = ProjectInspector.inspect(path)
                 saved_data = self.config.load_project_data(path)
 
@@ -113,11 +114,52 @@ class ProjectsView(QWidget):
                     on_refresh=self.load_recent_projects
                 )
                 self.cards_layout.addWidget(card)
+            elif path:
+                # Original papka yo'q bo'lsa yoki bo'sh (0 ta fayl) bo'lsa -> AppData keshidan avtomatik tiklash
+                self._handle_missing_or_empty_project(p)
+
+    def _handle_missing_or_empty_project(self, project_info: dict):
+        """Original papka topilmaganda yoki bo'sh (0 ta fayl) bo'lganda, keshdan avtomatik asl o'rniga tiklash"""
+        path = project_info.get("path")
+        if not path:
+            return
+
+        from app.utils.cache_manager import get_cache_dir
+        import shutil
+        project_id = self.config._get_project_id(path)
+        cache_dir = os.path.join(get_cache_dir(), project_id)
+
+        if os.path.exists(cache_dir) and os.listdir(cache_dir):
+            try:
+                os.makedirs(path, exist_ok=True)
+                for item in os.listdir(cache_dir):
+                    s = os.path.join(cache_dir, item)
+                    d = os.path.join(path, item)
+                    if os.path.isdir(s):
+                        shutil.copytree(s, d, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(s, d)
+            except Exception:
+                pass
+
+        # Kartani qayta ko'rsatish uchun metadata saqlash
+        if os.path.exists(path):
+            project_meta = ProjectInspector.inspect(path)
+            project_meta["name"] = project_info.get("name", os.path.basename(path))
+            self.config.save_project_data(path, extra_data=project_meta)
+            card = ProjectCard(
+                project_info=project_meta,
+                config=self.config,
+                on_open=self.on_project_selected,
+                on_icon_changed=self.load_recent_projects,
+                on_refresh=self.load_recent_projects
+            )
+            self.cards_layout.addWidget(card)
 
     def open_folder(self):
         """
         Papka tanlanganda (bo'sh yoki to'la bo'lishidan qat'i nazar),
-        shablon dialogisiz to'g'ridan-to'g'ri loyiha sifatida saqlash va redaktorga o'tish.
+        loyihani ochish va background QThread da AppData zaxirasini yarata boshlash.
         """
         folder = QFileDialog.getExistingDirectory(self, "Loyiha papkasini tanlang")
         if folder:
@@ -128,4 +170,10 @@ class ProjectsView(QWidget):
 
             self.config.save_project_data(folder, extra_data=project_meta)
             self.refresh_projects_list()
+
+            # Background QThread orqali AppData kesh zaxirasini yozish (10 GB disk joyi sharti bilan)
+            from app.utils.cache_manager import CacheBackupWorker
+            self.backup_worker = CacheBackupWorker(folder)
+            self.backup_worker.start()
+
             self.on_project_selected(folder, False)

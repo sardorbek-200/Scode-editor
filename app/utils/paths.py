@@ -51,6 +51,14 @@ def get_icons_dir() -> str:
     return d
 
 
+def get_file_icons_dir() -> str:
+    """File Explorer uchun dinamik ikonkalar saqlanadigan papka (%LOCALAPPDATA%/ScodeEditor/assets/file-icons/)"""
+    d = os.path.join(get_app_data_dir(), "assets", "file-icons")
+    os.makedirs(os.path.join(d, "files"), exist_ok=True)
+    os.makedirs(os.path.join(d, "folders"), exist_ok=True)
+    return d
+
+
 def sync_local_assets() -> None:
     """
     Loyiha ildizidagi ./assets papkasining barcha tarkibini (shu jumladan icon.png)
@@ -74,8 +82,6 @@ def sync_local_assets() -> None:
                     pass  # No debug print – silently ignore copy errors
 
 
-
-
 def get_app_icon_path() -> str:
     """
     main.py va ilova uchun ikonka yo'lini %LOCALAPPDATA%/ScodeEditor/assets/icon.png papkasidan olish
@@ -90,5 +96,6 @@ def ensure_app_data_dirs() -> None:
     get_app_data_dir()
     get_projects_dir()
     get_icons_dir()
+    get_file_icons_dir()
     get_projects_json_path()
     sync_local_assets()

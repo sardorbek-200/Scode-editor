@@ -6,6 +6,7 @@ from PyQt6.QtGui import QIcon
 
 from app.utils.paths import ensure_app_data_dirs, get_app_icon_path
 from app.utils.icon_manager import IconManager
+from app.ui.splash_screen import SplashScreen
 from app import App
 
 # 1. Windows Taskbar / Task Manager AppUserModelID ni ro'yxatdan o'tkazish
@@ -32,25 +33,37 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("ScodeEditor")
 
-    # AppData papkalari va SVG ikonkalarini tayyorlash
+    # 1. Splash Screen'ni DARHOL (0.1s ichida) ekranga chiqarish
+    splash = SplashScreen()
+    splash.show()
+    splash.set_progress(20, "AppData va sozlamalar yuklanmoqda...")
+    app.processEvents()
+
+    # 2. AppData papkalari va SVG ikonkalarini tayyorlash
     ensure_app_data_dirs()
+    splash.set_progress(45, "Dinamik ikonka va aktivlar yuklanmoqda...")
     IconManager.ensure_icons()
 
-    # 3. QApplication va oyna uchun xavfsiz ikonkani biriktirish
+    # 3. QApplication uchun xavfsiz ikonkani biriktirish
     if os.path.exists(ICON_PATH):
         app_icon = QIcon(ICON_PATH)
         app.setWindowIcon(app_icon)
     else:
         app_icon = QIcon()
 
-    # 4. Asosiy Oyna (MainWindow / App) obyektini yaratish
+    splash.set_progress(75, "Interfeys va tahrirlagich tayyorlanmoqda...")
+
+    # 4. Asosiy Oyna (MainWindow / App) obyektini fonda yaratish
     window = App()
 
     # 5. Window va Taskbar uchun ikonkani biriktirish
     if not app_icon.isNull():
         window.setWindowIcon(app_icon)
 
-    window.show()
+    splash.set_progress(100, "Tayyor!")
+
+    # 6. Splash Screen'ni berkitish hamda Asosiy Oynani namoyish etish
+    splash.finish(window)
 
     sys.exit(app.exec())
 

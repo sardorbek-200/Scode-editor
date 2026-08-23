@@ -3,10 +3,10 @@
 ; Non-commercial use only
 
 #define MyAppName "Scode Editor"
-#define MyAppVersion "0.4.0"
+#define MyAppVersion "1.0"
 #define MyAppPublisher "SStudio"
 #define MyAppURL "https://sstudio.uz"
-#define MyAppExeName "Scode_Editor.exe"
+#define MyAppExeName "ScodeEditor.exe"
 
 [Setup]
 ; NOTE: The value of AppId uniquely identifies this application. Do not use the same AppId value in installers for other applications.
@@ -47,8 +47,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "D:\loyham\scode\dist\Scode_Editor\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "D:\loyham\scode\dist\Scode_Editor\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "D:\loyham\scode\dist\ScodeEditor\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "D:\loyham\scode\dist\ScodeEditor\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
 [Icons]

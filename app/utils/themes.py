@@ -177,18 +177,23 @@ def get_stylesheet(theme_name: str) -> str:
 
     /* QTabWidget va QTabBar (Fayl Tablari) */
     QTabWidget::pane {{
-        border: 1px solid {c['border']};
+        border: none;
+        margin-top: 0px;
         background-color: {c['bg_editor']};
+    }}
+    QTabBar {{
+        background-color: {c['bg_panel']};
+        border-bottom: 1px solid {c['border']};
     }}
     QTabBar::tab {{
         background-color: {c['bg_panel']};
         color: {c['fg_muted']};
-        border: 1px solid {c['border']};
-        border-bottom: none;
-        padding: 7px 14px;
-        margin-right: 2px;
-        border-top-left-radius: 4px;
-        border-top-right-radius: 4px;
+        border: none;
+        border-right: 1px solid {c['border']};
+        height: 32px;
+        padding: 0 14px;
+        min-width: 80px;
+        font-size: 12px;
     }}
     QTabBar::tab:selected {{
         background-color: {c['bg_editor']};

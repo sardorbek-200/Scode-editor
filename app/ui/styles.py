@@ -132,7 +132,7 @@ QTabWidget {
 }
 QTabWidget::pane {
     border: none;
-    top: 0px;
+    margin-top: 0px;
     background-color: #1e1e1e;
 }
 QTabBar {

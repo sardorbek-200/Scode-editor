@@ -27,6 +27,41 @@ class SearchPanel(QWidget):
         self.setObjectName("searchPanel")
         self.setVisible(False)
 
+        self.setStyleSheet("""
+            QWidget#searchPanel {
+                background-color: #252526;
+                border: 1px solid #007acc;
+                border-radius: 4px;
+                padding: 2px;
+            }
+            QLineEdit {
+                background-color: #1e1e1e;
+                color: #ffffff;
+                border: 1px solid #3c3c3c;
+                border-radius: 3px;
+                padding: 4px 8px;
+                font-size: 12px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #007acc;
+            }
+            QPushButton {
+                background-color: #0e639c;
+                color: #ffffff;
+                border: none;
+                border-radius: 3px;
+                padding: 4px 10px;
+                font-size: 12px;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                background-color: #1177bb;
+            }
+            QPushButton:pressed {
+                background-color: #094771;
+            }
+        """)
+
         layout = QHBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(6)
@@ -76,7 +111,9 @@ class SearchPanel(QWidget):
         self.replace_all_btn.setVisible(False)
         self.find_input.setText(text)
         self.setVisible(True)
+        self.raise_()
         self.find_input.setFocus()
+        self.find_input.selectAll()
 
     def show_replace(self, find_text: str = "", replace_text: str = ""):
         self.replace_input.setVisible(True)
@@ -85,7 +122,9 @@ class SearchPanel(QWidget):
         self.find_input.setText(find_text)
         self.replace_input.setText(replace_text)
         self.setVisible(True)
+        self.raise_()
         self.find_input.setFocus()
+        self.find_input.selectAll()
 
     def hide_panel(self):
         self.setVisible(False)
